@@ -19,6 +19,8 @@
 
 namespace facebook::velox::functions {
 
+static const auto MAX_BITS = 64;
+
 template <typename T>
 struct BitwiseAndFunction {
   template <typename TInput>
@@ -218,6 +220,31 @@ struct BitwiseShiftLeftFunction {
     } else {
       result = (number << shift & ((1LL << bits) - 1));
     }
+    return true;
+  }
+};
+
+template <typename T>
+struct BitCountFunction {
+  FOLLY_ALWAYS_INLINE bool call(int64_t& result, int64_t num, int64_t bits) {
+    if (bits == MAX_BITS) {
+      result = std::bitset<64>(num).count();
+    } else {
+      VELOX_USER_CHECK(
+          !(bits <= 1 || bits > 64), "Bits must be between 2 and 64");
+
+      auto lowBitsMask =
+          (1L << (bits - 1)) - 1; // set the least (bits - 1) bits
+      VELOX_USER_CHECK(
+          !(num > lowBitsMask || num < ~lowBitsMask),
+          "Number must be representable with the bits specified. {} can not be represented with {} bits",
+          num,
+          bits);
+
+      auto mask = (1ULL << bits) - 1;
+      result = std::bitset<64>(num & mask).count();
+    }
+
     return true;
   }
 };

@@ -84,6 +84,11 @@ class BitwiseTest : public functions::test::FunctionBaseTest {
       std::optional<T> b) {
     return evaluateOnce<int64_t>("bitwise_right_shift(c0, c1)", a, b);
   }
+
+  template <typename T>
+  std::optional<int64_t> bitCount(std::optional<T> a, std::optional<T> b) {
+    return evaluateOnce<int64_t>("bit_count(c0, c1)", a, b);
+  }
 };
 
 TEST_F(BitwiseTest, bitwiseAnd) {
@@ -351,6 +356,53 @@ TEST_F(BitwiseTest, shiftLeft) {
       [&]() { bitwiseLogicalShiftRight(3, -1, 3); }, "Shift must be positive");
   assertUserError(
       [&]() { bitwiseLogicalShiftRight(3, 1, 1); },
+      "Bits must be between 2 and 64");
+}
+
+TEST_F(BitwiseTest, bitCount) {
+  EXPECT_EQ(bitCount<int64_t>(0, 64), 0);
+  EXPECT_EQ(bitCount<int64_t>(7, 64), 3);
+  EXPECT_EQ(bitCount<int64_t>(24, 64), 2);
+  EXPECT_EQ(bitCount<int64_t>(-8, 64), 61);
+  EXPECT_EQ(bitCount<int64_t>(kMax32, 64), 31);
+  EXPECT_EQ(bitCount<int64_t>(kMin32, 64), 33);
+  EXPECT_EQ(bitCount<int64_t>(kMax64, 64), 63);
+  EXPECT_EQ(bitCount<int64_t>(kMin64, 64), 1);
+
+  EXPECT_EQ(bitCount<int64_t>(0, 32), 0);
+  EXPECT_EQ(bitCount<int64_t>(-8, 6), 3);
+  EXPECT_EQ(bitCount<int64_t>(7, 32), 3);
+  EXPECT_EQ(bitCount<int64_t>(24, 32), 2);
+  EXPECT_EQ(bitCount<int64_t>(-8, 32), 29);
+  EXPECT_EQ(bitCount<int64_t>(kMax32, 32), 31);
+  EXPECT_EQ(bitCount<int64_t>(kMin32, 32), 1);
+  assertUserError(
+    [&]() { bitCount<int64_t>(kMax32 + 1, 32); },
+    "Number must be representable with the bits specified. 2147483648 can not be represented with 32 bits");
+  assertUserError(
+    [&]() { bitCount<int64_t>(kMin32 - 1, 32); },
+    "Number must be representable with the bits specified. -2147483649 can not be represented with 32 bits");
+
+  EXPECT_EQ(bitCount<int64_t>(1152921504598458367, 62), 59);
+  EXPECT_EQ(bitCount<int64_t>(-1, 62), 62);
+  EXPECT_EQ(bitCount<int64_t>(33554132, 26), 20);
+  EXPECT_EQ(bitCount<int64_t>(-1, 26), 26);
+  assertUserError(
+    [&]() { bitCount<int64_t>(1152921504598458367, 60); },
+    "Number must be representable with the bits specified. 1152921504598458367 can not be represented with 60 bits");
+
+  assertUserError(
+    [&]() { bitCount<int64_t>(33554132, 25); },
+    "Number must be representable with the bits specified. 33554132 can not be represented with 25 bits");
+
+  assertUserError(
+      [&]() { bitCount<int64_t>(0, -1); },
+      "Bits must be between 2 and 64");
+  assertUserError(
+      [&]() { bitCount<int64_t>(0, 1); },
+      "Bits must be between 2 and 64");
+    assertUserError(
+      [&]() { bitCount<int64_t>(0, 65); },
       "Bits must be between 2 and 64");
 }
 

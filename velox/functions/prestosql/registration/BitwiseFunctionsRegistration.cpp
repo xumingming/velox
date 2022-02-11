@@ -61,6 +61,8 @@ void registerBitwiseFunctions() {
       int64_t,
       int64_t,
       int64_t>({"bitwise_shift_left"});
+
+  registerFunction<BitCountFunction, int64_t, int64_t, int64_t>({"bit_count"});
 }
 
 } // namespace facebook::velox::functions
