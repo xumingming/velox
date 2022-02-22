@@ -41,6 +41,7 @@ ScanSpec* ScanSpec::getOrCreateChild(const Subfield& subfield) {
 }
 
 uint64_t ScanSpec::newRead() {
+  // 已经读过了，做一下conjunct reorder
   if (!numReads_) {
     reorder();
   } else if (enableFilterReorder_) {
@@ -58,6 +59,7 @@ uint64_t ScanSpec::newRead() {
   return numReads_++;
 }
 
+/// 这就是传说中的 Adaptive Conjunct Reordering
 void ScanSpec::reorder() {
   if (children_.empty()) {
     return;

@@ -496,6 +496,7 @@ RowVectorPtr HiveDataSource::next(uint64_t size) {
   if (rowsScanned) {
     VELOX_CHECK(
         !output_->mayHaveNulls(), "Top-level row vector cannot have nulls");
+    // 这里的意思是说scan了数据，但是这里没有数据，说明没通过filter? filter在哪里做的?
     auto rowsRemaining = output_->size();
     if (rowsRemaining == 0) {
       // no rows passed the pushed down filters

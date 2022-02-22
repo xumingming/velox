@@ -30,9 +30,9 @@ set -x # Print commands that are executed.
 
 FB_OS_VERSION=v2021.05.10.00
 NPROC=$(getconf _NPROCESSORS_ONLN)
-COMPILER_FLAGS="-mavx2 -mfma -mavx -mf16c -masm=intel -mlzcnt"
+COMPILER_FLAGS="-w -mavx2 -mfma -mavx -mf16c -masm=intel -mlzcnt"
 DEPENDENCY_DIR=${DEPENDENCY_DIR:-$(pwd)}
-MACOS_DEPS="ninja cmake ccache protobuf icu4c boost gflags glog libevent lz4 lzo snappy xz zstd openssl@1.1"
+MACOS_DEPS="ninja cmake ccache protobuf icu4c boost gflags libevent lz4 lzo snappy xz zstd openssl@1.1"
 
 function run_and_time {
   time "$@"
@@ -70,7 +70,7 @@ function github_checkout {
     rm -rf "${DIRNAME}"
   fi
   if [ ! -d "${DIRNAME}" ]; then
-    git clone -q "https://github.com/${REPO}.git"
+    git clone  "git@github.com:${REPO}.git"
   fi
   cd "${DIRNAME}"
   git fetch -q
@@ -84,6 +84,7 @@ function cmake_install {
     rm -rf "${BINARY_DIR}"
   fi
   mkdir -p "${BINARY_DIR}"
+  echo "COMPILER FLAGS:" ${COMPILER_FLAGS}
   cmake -Wno-dev -B"${BINARY_DIR}" \
     -GNinja \
     -DCMAKE_CXX_STANDARD=17 \
@@ -120,7 +121,7 @@ function install_build_prerequisites {
 }
 
 function install_googletest {
-  github_checkout google/googletest release-1.10.0
+  github_checkout google/googletest #release-1.10.0
   cmake_install
 }
 
@@ -155,7 +156,7 @@ function install_velox_deps {
     run_and_time install_build_prerequisites
   fi
   run_and_time install_ranges_v3
-  run_and_time install_googletest
+  #run_and_time install_googletest
   run_and_time install_fmt
   run_and_time install_double_conversion
   run_and_time install_folly
