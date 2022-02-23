@@ -1504,3 +1504,37 @@ TEST_F(VectorTest, clearAllNulls) {
   ASSERT_FALSE(vector->mayHaveNulls());
   ASSERT_FALSE(vector->isNullAt(50));
 }
+
+TEST_F(VectorTest, testRowVector) {
+  auto vectorSize = 100;
+  auto rowType = ROW({"id", "name"}, {INTEGER(), VARCHAR()});
+
+  auto stringVector = std::dynamic_pointer_cast<FlatVector<StringView>>(
+      BaseVector::create(VARCHAR(), 5, pool_.get()));
+
+  stringVector->setNull(0, true);
+  stringVector->set(1, "hello");
+  stringVector->set(2, "world");
+  stringVector->set(3, "james");
+  stringVector->set(4, "bond");
+
+  auto int32Vector = std::dynamic_pointer_cast<FlatVector<int32_t>>(
+      BaseVector::create(INTEGER(), 5, pool_.get()));
+  int32Vector->setNull(0, true);
+  int32Vector->set(1, 10);
+  int32Vector->set(2, 20);
+  int32Vector->set(3, 30);
+  int32Vector->set(4, 40);
+
+  std::cout << "Hello World" << std::endl;
+
+  RowVector rowVector(
+      pool_.get(),
+      rowType,
+      BufferPtr(nullptr),
+      5,
+      {int32Vector, stringVector}
+      );
+
+  std::cout << "James Bond" << std::endl;
+}
