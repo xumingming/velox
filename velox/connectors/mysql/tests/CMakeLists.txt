@@ -11,12 +11,13 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-add_library(velox_connector Connector.cpp)
+add_executable(velox_mysql_connector_test MysqlConnectorTest.cpp)
+add_test(velox_mysql_connector_test velox_mysql_connector_test)
 
-target_link_libraries(velox_connector velox_config velox_vector)
-
-if(${VELOX_ENABLE_HIVE_CONNECTOR})
-  add_subdirectory(hive)
-endif()
-
-add_subdirectory(mysql)
+target_link_libraries(
+  velox_mysql_connector_test
+  velox_mysql_connector
+  velox_vector_test_lib
+  velox_exec
+  velox_exec_test_util
+  ${GTEST_BOTH_LIBRARIES})

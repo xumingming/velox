@@ -11,12 +11,17 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-add_library(velox_connector Connector.cpp)
 
-target_link_libraries(velox_connector velox_config velox_vector)
+add_library(velox_mysql_connector OBJECT MysqlConnector.cpp)
+target_link_libraries(velox_mysql_connector velox_connector velox_core)
+set(LIB_NAME velox_mysql_connector)
 
-if(${VELOX_ENABLE_HIVE_CONNECTOR})
-  add_subdirectory(hive)
+
+include_directories(/usr/local/mysql-connector-c++-8.0.28/include)
+link_directories(/usr/local/mysql-connector-c++-8.0.28/lib64)
+target_link_libraries (${LIB_NAME} glog::glog mysqlcppconn)
+
+if(${VELOX_BUILD_TESTING})
+    add_subdirectory(tests)
 endif()
 
-add_subdirectory(mysql)

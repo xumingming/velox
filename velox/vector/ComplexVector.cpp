@@ -66,6 +66,7 @@ std::shared_ptr<RowVector> RowVector::createEmpty(
   return std::static_pointer_cast<RowVector>(BaseVector::create(type, 0, pool));
 }
 
+// 查看两个vector两个index是否一样
 bool RowVector::equalValueAt(
     const BaseVector* other,
     vector_size_t index,
