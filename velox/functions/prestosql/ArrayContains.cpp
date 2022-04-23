@@ -28,6 +28,7 @@ void applyTyped(
     FlatVector<bool>& flatResult) {
   using T = typename TypeTraits<kind>::NativeType;
 
+  // 到这个方法的时候，所有的vector都是decoded了
   auto baseArray = arrayDecoded.base()->as<ArrayVector>();
   auto rawSizes = baseArray->rawSizes();
   auto rawOffsets = baseArray->rawOffsets();
@@ -58,6 +59,7 @@ void applyTyped(
       auto size = rawSizes[indices[row]];
       auto offset = rawOffsets[indices[row]];
 
+      // search可能为null吗？
       auto search = searchDecoded.valueAt<T>(row);
 
       bool foundNull = false;
@@ -71,6 +73,7 @@ void applyTyped(
         }
       }
 
+      // 这个是contains的语意，如果没有找到search，但是找到null了，那么返回null
       if (foundNull) {
         flatResult.setNull(row, true);
       } else {
@@ -163,25 +166,33 @@ class ArrayContainsFunction : public exec::VectorFunction {
       exec::EvalCtx* context,
       VectorPtr* result) const override {
     VELOX_CHECK_EQ(args.size(), 2);
+    // 参数先拿出来再说
     const auto& arrayVector = args[0];
     const auto& searchVector = args[1];
 
+    // 检查一下类型是否能对得上
     VELOX_CHECK(arrayVector->type()->isArray());
     VELOX_CHECK(arrayVector->type()->asArray().elementType()->kindEquals(
         searchVector->type()));
 
+    // 准备结果vector
     BaseVector::ensureWritable(rows, BOOLEAN(), context->pool(), result);
     auto flatResult = (*result)->asFlatVector<bool>();
 
+    // decode一下arrayVector
     exec::LocalDecodedVector arrayHolder(context, *arrayVector, rows);
+    // 把array底层的elements拿出来
     auto elements = arrayHolder.get()->base()->as<ArrayVector>()->elements();
 
+    // 构造elements对应的rows，并且所有的都选上
     exec::LocalSelectivityVector nestedRows(context, elements->size());
     nestedRows.get()->setAll();
 
+    // decode这个elements
     exec::LocalDecodedVector elementsHolder(
         context, *elements, *nestedRows.get());
 
+    // 把search vector decode一下
     exec::LocalDecodedVector searchHolder(context, *searchVector, rows);
 
     VELOX_DYNAMIC_TYPE_DISPATCH(

@@ -165,6 +165,8 @@ VectorPtr BaseVector::wrapInSequence(
       addSequence, kind, lengths, size, std::move(vector));
 }
 
+// 不是简单的搞一个Constant的wrapper，而是会尽可能的外面的cover都剥掉
+// 保证最后的constant vector足够简单
 template <TypeKind kind>
 static VectorPtr
 addConstant(vector_size_t size, vector_size_t index, VectorPtr vector) {
@@ -173,6 +175,7 @@ addConstant(vector_size_t size, vector_size_t index, VectorPtr vector) {
   auto pool = vector->pool();
 
   if (vector->isNullAt(index)) {
+    // 看起来ComplexType只是一个占位符号
     if constexpr (std::is_same_v<T, ComplexType>) {
       auto singleNull = BaseVector::create(vector->type(), 1, pool);
       singleNull->setNull(0, true);
@@ -189,6 +192,7 @@ addConstant(vector_size_t size, vector_size_t index, VectorPtr vector) {
       auto constVector = vector->as<ConstantVector<T>>();
       if constexpr (!std::is_same_v<T, ComplexType>) {
         if (!vector->valueVector()) {
+          // 到了这里说明是简单的类型，并且可以直接拿到值
           T value = constVector->valueAt(0);
           return std::make_shared<ConstantVector<T>>(
               pool, size, false, vector->type(), std::move(value));

@@ -50,8 +50,10 @@ void DecodedVector::decode(
     const BaseVector& vector,
     const SelectivityVector& rows,
     bool loadLazy) {
+  // 先全部清零
   reset(rows.end());
   loadLazy_ = loadLazy;
+  // 先load再进来
   if (loadLazy_ && (isLazyNotLoaded(vector) || vector.isLazy())) {
     decode(*vector.loadedVector(), rows);
     return;
@@ -65,6 +67,7 @@ void DecodedVector::decode(
     case VectorEncoding::Simple::ARRAY:
     case VectorEncoding::Simple::MAP:
     case VectorEncoding::Simple::LAZY:
+      // 先看这些没有花头的vector
       isIdentityMapping_ = true;
       setBaseData(vector, rows);
       return;
@@ -113,6 +116,7 @@ void DecodedVector::reset(vector_size_t size) {
   constantIndex_ = 0;
 }
 
+// 把null的信息先copy出来
 void DecodedVector::copyNulls(vector_size_t size) {
   auto numWords = bits::nwords(size);
   copiedNulls_.resize(numWords);
@@ -322,11 +326,14 @@ void DecodedVector::setFlatNulls(
     const BaseVector& vector,
     const SelectivityVector& rows) {
   if (hasExtraNulls_) {
+    // 把当前的nulls_拷贝出来
     if (nullsNotCopied()) {
       copyNulls(rows.end());
     }
     auto leafNulls = vector.rawNulls();
     auto copiedNulls = &copiedNulls_[0];
+    // 当前层不为null但是在叶子结点是null的情况，把null拷贝过来
+    // 看起来是要合并所有层的null为最终的null?
     rows.applyToSelected([&](vector_size_t row) {
       if (!bits::isBitNull(nulls_, row) &&
           (leafNulls && bits::isBitNull(leafNulls, indices_[row]))) {
@@ -335,7 +342,9 @@ void DecodedVector::setFlatNulls(
     });
     nulls_ = &copiedNulls_[0];
   } else {
+    // 把nulls的信息引用过来
     nulls_ = vector.rawNulls();
+    // 如果nulls不会null，那么可能是有null的
     mayHaveNulls_ = nulls_ != nullptr;
   }
 }
@@ -350,6 +359,7 @@ void DecodedVector::setBaseData(
       break;
     case VectorEncoding::Simple::FLAT: {
       // values() may be nullptr if 'vector' is all nulls.
+      // 处理数据：把数据转成普通的指针
       data_ = vector.values() ? vector.values()->as<void>() : nullptr;
       setFlatNulls(vector, rows);
       break;

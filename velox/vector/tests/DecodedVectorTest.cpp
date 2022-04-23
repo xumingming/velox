@@ -47,13 +47,16 @@ class DecodedVectorTest : public testing::Test {
       SimpleVector<T>* outVector,
       bool dbgPrintVec) {
     DecodedVector decoded(*outVector, selection);
+    // TOREAD: selection.end() 为什么好像被当作size来对待
     auto end = selection.end();
     ASSERT_EQ(expected.size(), end);
 
     for (int32_t index = selection.begin(); index < end; ++index) {
+      // 没有被选中，也是我们不关心的部分
       if (!selection.isValid(index)) {
         continue;
       }
+      // 这个是assertdecode之前跟decode之后是否是一致的
       bool actualIsNull = outVector->isNullAt(index);
       auto actualValue = outVector->valueAt(index);
       ASSERT_EQ(actualIsNull, decoded.isNullAt(index));
@@ -486,8 +489,11 @@ TEST_F(DecodedVectorTest, dictionaryOverConstant) {
 
 TEST_F(DecodedVectorTest, wrapOnDictionaryEncoding) {
   const int kSize = 12;
+  // intVector是一个12个元素的flatVector，每个槽位的value等于槽位自己
   auto intVector =
       vectorMaker_->flatVector<int32_t>(kSize, [](auto row) { return row; });
+  // 组织了一个RowVector，这个RowVector只有一个intVector在里面
+  // 为什么要组织这个rowVector呢?
   auto rowVector = vectorMaker_->rowVector({intVector});
 
   // Test dictionary with depth one
@@ -497,6 +503,7 @@ TEST_F(DecodedVectorTest, wrapOnDictionaryEncoding) {
   auto dictionaryVector =
       BaseVector::wrapInDictionary(nullsOne, indicesOne, kSize, rowVector);
   SelectivityVector allRows(kSize);
+  // 先decode，然后又wrap，这是想干什么?
   DecodedVector decoded(*dictionaryVector, allRows);
   auto wrappedVector = decoded.wrap(intVector, *dictionaryVector, allRows);
   for (auto i = 0; i < kSize; i++) {

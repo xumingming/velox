@@ -178,6 +178,8 @@ class DecodedVector {
         indices_ >= &copiedIndices_.back();
   }
 
+  // copiedNulls是一个工作区，如果nulls被copy过后，那么它大概率是不会emptyd的
+  // 除非nulls_本来就是NULL
   bool nullsNotCopied() const {
     return copiedNulls_.empty() || nulls_ != copiedNulls_.data();
   }
