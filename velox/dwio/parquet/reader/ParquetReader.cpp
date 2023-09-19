@@ -760,14 +760,17 @@ class ParquetRowReader::Impl {
     }
     ParquetParams params(
         pool_, columnReaderStats_, readerBase_->fileMetaData());
-    auto columnSelector = std::make_shared<ColumnSelector>(
-        ColumnSelector::apply(options_.getSelector(), readerBase_->schema()));
+    auto columnSelector = options_.getSelector()
+        ? options_.getSelector()
+        : std::make_shared<ColumnSelector>(ColumnSelector::apply(
+              options_.getSelector(), readerBase_->schema()));
     requestedType_ = columnSelector->getSchemaWithId();
     columnReader_ = ParquetColumnReader::build(
         requestedType_,
         readerBase_->schemaWithId(), // Id is schema id
         params,
-        *options_.getScanSpec());
+        *options_.getScanSpec(),
+        pool_);
 
     filterRowGroups();
     if (!rowGroupIds_.empty()) {

@@ -32,6 +32,22 @@ std::vector<std::shared_ptr<const TypeWithId>> toShared(
   }
   return result;
 }
+
+TypePtr adjustNameAsLowerCase(const TypePtr& type) {
+  if (auto rowTypePtr = asRowType(type)) {
+    std::vector<std::string> names;
+    names.reserve(rowTypePtr->names().size());
+    std::vector<TypePtr> types = rowTypePtr->children();
+    for (const auto& name : rowTypePtr->names()) {
+      std::string childName = name;
+      folly::toLowerAscii(childName);
+      names.emplace_back(childName);
+    }
+    return TypeFactory<TypeKind::ROW>::create(
+        std::move(names), std::move(types));
+  }
+  return type;
+}
 } // namespace
 
 TypeWithId::TypeWithId(
@@ -55,6 +71,29 @@ std::unique_ptr<TypeWithId> TypeWithId::create(
     const std::shared_ptr<const Type>& root,
     uint32_t next) {
   return create(root, next, 0);
+}
+
+std::unique_ptr<TypeWithId> TypeWithId::duplicate(bool nameAsLowerCase) const {
+  if (children_.empty()) {
+    std::vector<std::unique_ptr<TypeWithId>> children;
+    return std::make_unique<TypeWithId>(
+        nameAsLowerCase ? adjustNameAsLowerCase(type_) : type_,
+        std::move(children),
+        id_,
+        maxId_,
+        column_);
+  }
+  std::vector<std::unique_ptr<TypeWithId>> children;
+  children.reserve(children_.size());
+  for (const auto& child : children_) {
+    children.emplace_back(child->duplicate(nameAsLowerCase));
+  }
+  return std::make_unique<TypeWithId>(
+      nameAsLowerCase ? adjustNameAsLowerCase(type_) : type_,
+      std::move(children),
+      id_,
+      maxId_,
+      column_);
 }
 
 uint32_t TypeWithId::size() const {

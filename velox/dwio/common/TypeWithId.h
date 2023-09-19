@@ -39,6 +39,8 @@ class TypeWithId : public velox::Tree<std::shared_ptr<const TypeWithId>> {
       const std::shared_ptr<const velox::Type>& root,
       uint32_t next = 0);
 
+  std::unique_ptr<TypeWithId> duplicate(bool nameAsLowerCase) const;
+
   uint32_t size() const override;
 
   const std::shared_ptr<const velox::Type>& type() const {
@@ -62,6 +64,11 @@ class TypeWithId : public velox::Tree<std::shared_ptr<const TypeWithId>> {
   }
 
   const std::shared_ptr<const TypeWithId>& childAt(uint32_t idx) const override;
+
+  bool containsChild(const std::string& name) const {
+    VELOX_CHECK_EQ(type_->kind(), velox::TypeKind::ROW);
+    return type_->as<velox::TypeKind::ROW>().containsChild(name);
+  }
 
   const std::shared_ptr<const TypeWithId>& childByName(
       const std::string& name) const {
