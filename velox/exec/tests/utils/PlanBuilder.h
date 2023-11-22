@@ -148,7 +148,8 @@ class PlanBuilder {
       const std::unordered_map<std::string, std::string>& columnAliases = {},
       const std::vector<std::string>& subfieldFilters = {},
       const std::string& remainingFilter = "",
-      const RowTypePtr& dataColumns = nullptr);
+      const RowTypePtr& dataColumns = nullptr,
+      bool isFilterPushdownEnabled = true);
 
   /// Add a TableScanNode to scan a TPC-H table.
   ///
@@ -181,6 +182,12 @@ class PlanBuilder {
     /// @param connectorId The id of the connector to scan.
     TableScanBuilder& connectorId(std::string connectorId) {
       connectorId_ = std::move(connectorId);
+      return *this;
+    }
+
+    /// @param isFilterPushdownEnabled Whether filter push-down is enabled.
+    TableScanBuilder& filterPushdown(bool isFilterPushdownEnabled) {
+      isFilterPushdownEnabled_ = isFilterPushdownEnabled;
       return *this;
     }
 
@@ -270,6 +277,7 @@ class PlanBuilder {
     PlanBuilder& planBuilder_;
     std::string tableName_{"hive_table"};
     std::string connectorId_{"test-hive"};
+    bool isFilterPushdownEnabled_ = true;
     RowTypePtr outputType_;
     std::vector<std::string> subfieldFilters_;
     std::string remainingFilter_;
