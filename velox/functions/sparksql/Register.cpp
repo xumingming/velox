@@ -43,6 +43,7 @@
 #include "velox/functions/sparksql/RegexFunctions.h"
 #include "velox/functions/sparksql/RegisterArithmetic.h"
 #include "velox/functions/sparksql/RegisterCompare.h"
+#include "velox/functions/sparksql/SIMDJsonFunctions.h"
 #include "velox/functions/sparksql/Size.h"
 #include "velox/functions/sparksql/SparkPartitionId.h"
 #include "velox/functions/sparksql/String.h"
@@ -179,6 +180,9 @@ void registerFunctions(const std::string& prefix) {
   registerSize(prefix + "size");
 
   registerRegexpReplace(prefix);
+
+  registerFunction<SIMDGetJsonObjectFunction, Varchar, Varchar, Varchar>(
+      {prefix + "get_json_object"});
 
   // Register string functions.
   registerFunction<sparksql::ChrFunction, Varchar, int64_t>({prefix + "chr"});
