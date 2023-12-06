@@ -395,6 +395,49 @@ bool matchExactPattern(
       std::memcmp(input.data(), pattern.data(), length) == 0;
 }
 
+// Match the input(from the position of start) with relaxed pattern(from the
+// specified subPattern).
+bool matchRelaxedFixedPattern(
+    StringView input,
+    const std::vector<SubPatternMetadata>& subPatterns,
+    size_t length,
+    size_t start,
+    size_t startPatternIndex = 0) {
+  // Compare the length first.
+  if (input.size() - start < length) {
+    return false;
+  }
+
+  auto indexInString = start;
+  for (auto i = startPatternIndex; i < subPatterns.size(); i++) {
+    auto& subPattern = subPatterns[i];
+    if (subPattern.kind == SubPatternMetadata::SubPatternKind::kLiteralString &&
+        std::memcmp(
+            input.data() + indexInString,
+            subPattern.pattern.data(),
+            subPattern.pattern.length()) != 0) {
+      return false;
+    }
+
+    indexInString += subPattern.pattern.length();
+  }
+
+  return true;
+}
+
+// Match string 'input' with a kRelaxedFixed pattern.
+bool matchRelaxedFixedPattern(
+    StringView input,
+    const std::vector<SubPatternMetadata>& subPatterns,
+    size_t length) {
+  // Compare the length first.
+  if (input.size() != length) {
+    return false;
+  }
+
+  return matchRelaxedFixedPattern(input, subPatterns, length, 0);
+}
+
 // Match the first 'length' characters of string 'input' and prefix pattern.
 bool matchPrefixPattern(
     StringView input,
@@ -402,6 +445,17 @@ bool matchPrefixPattern(
     size_t length) {
   return input.size() >= length &&
       std::memcmp(input.data(), pattern.data(), length) == 0;
+}
+
+bool matchRelaxedPrefixPattern(
+    StringView input,
+    const std::vector<SubPatternMetadata>& subPatterns,
+    size_t length) {
+  if (input.size() < length) {
+    return false;
+  }
+
+  return matchRelaxedFixedPattern(input, subPatterns, length, 0);
 }
 
 // Match the last 'length' characters of string 'input' and suffix pattern.
@@ -416,6 +470,18 @@ bool matchSuffixPattern(
           length) == 0;
 }
 
+bool matchRelaxedSuffixPattern(
+    StringView input,
+    const std::vector<SubPatternMetadata>& subPatterns,
+    size_t length) {
+  if (input.size() < length) {
+    return false;
+  }
+
+  return matchRelaxedFixedPattern(
+      input, subPatterns, length, input.size() - length);
+}
+
 bool matchSubstringPattern(
     const StringView& input,
     const std::string& fixedPattern) {
@@ -424,30 +490,92 @@ bool matchSubstringPattern(
       std::string::npos);
 }
 
+// For pattern '___hello___', it is split into three sub-patterns:
+//   - kSingleCharWildcard: ___
+//   - kLiteralString: hello
+//   - kSingleCharWildcard: ___
+//
+// A naive implementation is search the three pattern every time, a better
+// implementation is: skip the length of leading kSingleCharWildcard chars(3
+// here), and search the first kLiteralString string in input to start match.
+bool matchRelaxedSubstringPattern(
+    StringView input,
+    const PatternMetadata& patternMetadata) {
+  if (input.size() < patternMetadata.length()) {
+    return false;
+  }
+
+  // Valid search range is: [0, end].
+  auto start = patternMetadata.leadingSingleWildcardCharsCount();
+  auto startPatternIndex = start > 0 ? 1 : 0;
+  auto& firstFixedString =
+      patternMetadata.subPatterns()[startPatternIndex].pattern;
+  auto indexInString = start;
+  auto end = input.size() - patternMetadata.restFixedLength() + start;
+
+  while (indexInString <= end) {
+    // Search the firstFixedString to find out where to start match the whole
+    // pattern.
+    auto it = strstr(input.begin() + indexInString, firstFixedString.c_str());
+    // The firstFixedString is not found, no need to match anymore.
+    if (!it) {
+      return false;
+    }
+
+    // Match from the place where find first fixed string.
+    indexInString = it - input.begin();
+    if (matchRelaxedFixedPattern(
+            input,
+            patternMetadata.subPatterns(),
+            patternMetadata.restFixedLength(),
+            indexInString,
+            startPatternIndex)) {
+      return true;
+    } else {
+      // Not match the whole pattern, advance the cursor.
+      indexInString++;
+    }
+  }
+
+  return false;
+}
+
 template <PatternKind P>
 class OptimizedLike final : public VectorFunction {
  public:
-  OptimizedLike(std::string pattern, size_t reducedPatternLength)
-      : pattern_{std::move(pattern)},
-        reducedPatternLength_{reducedPatternLength} {}
+  OptimizedLike(const PatternMetadata& patternMetadata)
+      : patternMetadata_(std::move(patternMetadata)) {}
 
   static bool match(
       const StringView& input,
-      const std::string& pattern,
-      size_t reducedPatternLength) {
+      const PatternMetadata& patternMetadata) {
     switch (P) {
       case PatternKind::kExactlyN:
-        return input.size() == reducedPatternLength;
+        return input.size() == patternMetadata.length();
       case PatternKind::kAtLeastN:
-        return input.size() >= reducedPatternLength;
+        return input.size() >= patternMetadata.length();
       case PatternKind::kFixed:
-        return matchExactPattern(input, pattern, reducedPatternLength);
+        return matchExactPattern(
+            input, patternMetadata.fixedPattern(), patternMetadata.length());
+      case PatternKind::kRelaxedFixed:
+        return matchRelaxedFixedPattern(
+            input, patternMetadata.subPatterns(), patternMetadata.length());
       case PatternKind::kPrefix:
-        return matchPrefixPattern(input, pattern, reducedPatternLength);
+        return matchPrefixPattern(
+            input, patternMetadata.fixedPattern(), patternMetadata.length());
+      case PatternKind::kRelaxedPrefix:
+        return matchRelaxedPrefixPattern(
+            input, patternMetadata.subPatterns(), patternMetadata.length());
       case PatternKind::kSuffix:
-        return matchSuffixPattern(input, pattern, reducedPatternLength);
+        return matchSuffixPattern(
+            input, patternMetadata.fixedPattern(), patternMetadata.length());
+      case PatternKind::kRelaxedSuffix:
+        return matchRelaxedSuffixPattern(
+            input, patternMetadata.subPatterns(), patternMetadata.length());
       case PatternKind::kSubstring:
-        return matchSubstringPattern(input, pattern);
+        return matchSubstringPattern(input, patternMetadata.fixedPattern());
+      case PatternKind::kRelaxedSubstring:
+        return matchRelaxedSubstringPattern(input, patternMetadata);
     }
   }
 
@@ -465,13 +593,13 @@ class OptimizedLike final : public VectorFunction {
     if (toSearch->isIdentityMapping()) {
       auto input = toSearch->data<StringView>();
       context.applyToSelectedNoThrow(rows, [&](vector_size_t i) {
-        result.set(i, match(input[i], pattern_, reducedPatternLength_));
+        result.set(i, match(input[i], patternMetadata_));
       });
       return;
     }
     if (toSearch->isConstantMapping()) {
       auto input = toSearch->valueAt<StringView>(0);
-      bool matchResult = match(input, pattern_, reducedPatternLength_);
+      bool matchResult = match(input, patternMetadata_);
       context.applyToSelectedNoThrow(
           rows, [&](vector_size_t i) { result.set(i, matchResult); });
       return;
@@ -484,8 +612,7 @@ class OptimizedLike final : public VectorFunction {
   }
 
  private:
-  const std::string pattern_;
-  const size_t reducedPatternLength_;
+  const PatternMetadata patternMetadata_;
 };
 
 // This function is used when pattern and escape are constants. And there is not
@@ -595,28 +722,38 @@ class LikeGeneric final : public VectorFunction {
                         const std::optional<char>& escapeChar) -> bool {
       PatternMetadata patternMetadata =
           determinePatternKind(pattern, escapeChar);
-      const auto reducedLength = patternMetadata.length;
-      const auto& fixedPattern = patternMetadata.fixedPattern;
 
-      switch (patternMetadata.patternKind) {
+      switch (patternMetadata.patternKind()) {
         case PatternKind::kExactlyN:
           return OptimizedLike<PatternKind::kExactlyN>::match(
-              input, pattern, reducedLength);
+              input, patternMetadata);
         case PatternKind::kAtLeastN:
           return OptimizedLike<PatternKind::kAtLeastN>::match(
-              input, pattern, reducedLength);
+              input, patternMetadata);
         case PatternKind::kFixed:
           return OptimizedLike<PatternKind::kFixed>::match(
-              input, fixedPattern, reducedLength);
+              input, patternMetadata);
+        case PatternKind::kRelaxedFixed:
+          return OptimizedLike<PatternKind::kRelaxedFixed>::match(
+              input, patternMetadata);
         case PatternKind::kPrefix:
           return OptimizedLike<PatternKind::kPrefix>::match(
-              input, fixedPattern, reducedLength);
+              input, patternMetadata);
+        case PatternKind::kRelaxedPrefix:
+          return OptimizedLike<PatternKind::kRelaxedPrefix>::match(
+              input, patternMetadata);
         case PatternKind::kSuffix:
           return OptimizedLike<PatternKind::kSuffix>::match(
-              input, fixedPattern, reducedLength);
+              input, patternMetadata);
+        case PatternKind::kRelaxedSuffix:
+          return OptimizedLike<PatternKind::kRelaxedSuffix>::match(
+              input, patternMetadata);
         case PatternKind::kSubstring:
           return OptimizedLike<PatternKind::kSubstring>::match(
-              input, fixedPattern, reducedLength);
+              input, patternMetadata);
+        case PatternKind::kRelaxedSubstring:
+          return OptimizedLike<PatternKind::kRelaxedSubstring>::match(
+              input, patternMetadata);
         default:
           return applyWithRegex(input, pattern, escapeChar);
       }
@@ -970,6 +1107,137 @@ std::vector<std::shared_ptr<exec::FunctionSignature>> re2ExtractSignatures() {
   };
 }
 
+// Return the length of the fixed part of the pattern.
+size_t fixedLength(
+    const std::vector<SubPatternMetadata>& subPatterns,
+    size_t start = 0) {
+  size_t result = 0;
+  for (auto i = start; i < subPatterns.size(); i++) {
+    if (subPatterns[i].kind !=
+        SubPatternMetadata::SubPatternKind::kAnyCharsWildcard) {
+      result += subPatterns[i].pattern.length();
+    }
+  }
+
+  return result;
+}
+
+PatternMetadata PatternMetadata::generic() {
+  return {PatternKind::kGeneric, 0, {}, 0, 0};
+}
+
+PatternMetadata PatternMetadata::atLeastN(size_t length) {
+  return {PatternKind::kAtLeastN, length, {}, 0, 0};
+}
+
+PatternMetadata PatternMetadata::exactlyN(size_t length) {
+  return {PatternKind::kExactlyN, length, {}, 0, 0};
+}
+
+PatternMetadata PatternMetadata::fixed(
+    std::vector<SubPatternMetadata> subPatterns) {
+  return {
+      PatternKind::kFixed,
+      fixedLength(subPatterns),
+      std::move(subPatterns),
+      0,
+      0};
+}
+
+PatternMetadata PatternMetadata::relaxedFixed(
+    std::vector<SubPatternMetadata> subPatterns) {
+  return {
+      PatternKind::kRelaxedFixed,
+      fixedLength(subPatterns),
+      std::move(subPatterns),
+      0,
+      0};
+}
+
+PatternMetadata PatternMetadata::prefix(
+    std::vector<SubPatternMetadata> subPatterns) {
+  return {
+      PatternKind::kPrefix,
+      fixedLength(subPatterns),
+      std::move(subPatterns),
+      0,
+      0};
+}
+
+PatternMetadata PatternMetadata::relaxedPrefix(
+    std::vector<SubPatternMetadata> subPatterns) {
+  return {
+      PatternKind::kRelaxedPrefix,
+      fixedLength(subPatterns),
+      std::move(subPatterns),
+      0,
+      0};
+}
+
+PatternMetadata PatternMetadata::suffix(
+    std::vector<SubPatternMetadata> subPatterns) {
+  return {
+      PatternKind::kSuffix,
+      fixedLength(subPatterns),
+      std::move(subPatterns),
+      0,
+      0};
+}
+
+PatternMetadata PatternMetadata::relaxedSuffix(
+    std::vector<SubPatternMetadata> subPatterns) {
+  return {
+      PatternKind::kRelaxedSuffix,
+      fixedLength(subPatterns),
+      std::move(subPatterns),
+      0,
+      0};
+}
+
+PatternMetadata PatternMetadata::substring(
+    std::vector<SubPatternMetadata> subPatterns) {
+  return {
+      PatternKind::kSubstring,
+      fixedLength(subPatterns),
+      std::move(subPatterns),
+      0,
+      0};
+}
+
+PatternMetadata PatternMetadata::relaxedSubstring(
+    std::vector<SubPatternMetadata> subPatterns) {
+  auto leadingSingleWildcardCharsCount =
+      subPatterns[0].kind == SubPatternMetadata::SubPatternKind::kLiteralString
+      ? 0
+      : subPatterns[0].pattern.length();
+  auto restFixedLength = fixedLength(subPatterns, 1);
+
+  return {
+      PatternKind::kRelaxedSubstring,
+      fixedLength(subPatterns),
+      std::move(subPatterns),
+      leadingSingleWildcardCharsCount,
+      restFixedLength};
+}
+
+PatternMetadata::PatternMetadata(
+    PatternKind patternKind,
+    size_t length,
+    std::vector<SubPatternMetadata> subPatterns,
+    size_t leadingSingleWildcardCharsCount,
+    size_t restFixedLength)
+    : patternKind_{patternKind},
+      length_{length},
+      subPatterns_(subPatterns),
+      leadingSingleWildcardCharsCount_(leadingSingleWildcardCharsCount),
+      restFixedLength_(restFixedLength) {
+  std::ostringstream os;
+  for (auto& subPattern : subPatterns_) {
+    os << subPattern.pattern;
+  }
+  fixedPattern_ = os.str();
+}
+
 std::string unescape(
     StringView pattern,
     size_t start,
@@ -1095,6 +1363,11 @@ class PatternStringIterator {
     return isPreviousWildcard_;
   }
 
+  // Char at current cursor.
+  char current() const {
+    return pattern_.data()[currentIndex_];
+  }
+
  private:
   // Represents the state of current cursor/char.
   enum class CharKind {
@@ -1110,11 +1383,6 @@ class PatternStringIterator {
     kNormal
   };
 
-  // Char at current cursor.
-  char current() const {
-    return pattern_.data()[currentIndex_];
-  }
-
   const StringView pattern_;
   const std::optional<char> escapeChar_;
   const size_t lastIndex_;
@@ -1124,113 +1392,202 @@ class PatternStringIterator {
   bool isPreviousWildcard_{false};
 };
 
+// Sub-pattern's stats in a top-level pattern.
+struct SubPatternStats {
+  SubPatternMetadata::SubPatternKind kind;
+  // Count of this patterns in total.
+  size_t count = 0;
+  // First index of this pattern kind.
+  size_t firstIndex = -1;
+  // Last index of this pattern kind.
+  size_t lastIndex = -1;
+
+  void update(size_t index) {
+    count++;
+    if (firstIndex == -1) {
+      firstIndex = index;
+      lastIndex = index;
+    } else {
+      lastIndex = index;
+    }
+  }
+};
+
 PatternMetadata determinePatternKind(
     StringView pattern,
     std::optional<char> escapeChar) {
   int32_t patternLength = pattern.size();
 
-  // Index of the first % or _ character(not escaped).
-  int32_t wildcardStart = -1;
-  // Index of the first character that is not % and not _.
-  int32_t fixedPatternStart = -1;
-  // Index of the last character in the fixed pattern, used to retrieve the
-  // fixed string for patterns of type kSubstring.
-  int32_t fixedPatternEnd = -1;
-  // Count of wildcard character sequences in pattern.
-  size_t numWildcardSequences = 0;
-  // Total number of % characters.
-  size_t anyCharacterWildcardCount = 0;
-  // Total number of _ characters.
-  size_t singleCharacterWildcardCount = 0;
-
+  std::vector<SubPatternMetadata> subPatterns;
   PatternStringIterator iterator{pattern, escapeChar};
 
   // Iterate through the pattern string to collect the stats for the simple
   // patterns that we can optimize.
+  std::ostringstream os;
+  SubPatternMetadata::SubPatternKind previousKind;
+  bool isFirst = true;
   while (iterator.next()) {
-    if (iterator.isWildcard()) {
-      if (wildcardStart == -1) {
-        wildcardStart = iterator.currentIndex();
-      }
-
-      if (iterator.isSingleCharWildcard()) {
-        ++singleCharacterWildcardCount;
-      } else {
-        ++anyCharacterWildcardCount;
-      }
-
-      if (!iterator.isPreviousWildcard()) {
-        ++numWildcardSequences;
-      }
-
-      // Mark the end of the fixed pattern.
-      if (fixedPatternStart != -1 && fixedPatternEnd == -1) {
-        fixedPatternEnd = iterator.currentIndex() - 1;
-      }
+    SubPatternMetadata::SubPatternKind currentKind;
+    if (iterator.isSingleCharWildcard()) {
+      currentKind = SubPatternMetadata::SubPatternKind::kSingleCharWildcard;
+    } else if (iterator.isAnyCharsWildcard()) {
+      currentKind = SubPatternMetadata::SubPatternKind::kAnyCharsWildcard;
     } else {
-      // Record the first fixed pattern start.
-      if (fixedPatternStart == -1) {
-        fixedPatternStart = iterator.currentIndex();
-      } else {
-        // This is not the first fixed pattern, not supported, so fallback.
-        if (iterator.isPreviousWildcard()) {
-          return PatternMetadata{PatternKind::kGeneric, 0};
+      currentKind = SubPatternMetadata::SubPatternKind::kLiteralString;
+    }
+
+    // New sub pattern occurs.
+    if (currentKind != previousKind && !isFirst) {
+      subPatterns.push_back({previousKind, os.str()});
+
+      // Reset the stream.
+      os.str("");
+    }
+
+    isFirst = false;
+    previousKind = currentKind;
+    os << iterator.current();
+  }
+
+  // Handle the last sub-pattern.
+  subPatterns.push_back({previousKind, os.str()});
+
+  int numSubPatterns = subPatterns.size();
+  SubPatternStats literalStats{
+      SubPatternMetadata::SubPatternKind::kLiteralString};
+  SubPatternStats singleCharWildcardStats{
+      SubPatternMetadata::SubPatternKind::kSingleCharWildcard};
+  SubPatternStats anyCharsWildcardStats{
+      SubPatternMetadata::SubPatternKind::kAnyCharsWildcard};
+
+  // Collect the pattern stats.
+  for (auto i = 0; i < numSubPatterns; i++) {
+    const auto& subPattern = subPatterns[i];
+    switch (subPattern.kind) {
+      case SubPatternMetadata::SubPatternKind::kLiteralString:
+        literalStats.update(i);
+        break;
+      case SubPatternMetadata::SubPatternKind::kSingleCharWildcard:
+        singleCharWildcardStats.update(i);
+        break;
+      case SubPatternMetadata::SubPatternKind::kAnyCharsWildcard:
+        anyCharsWildcardStats.update(i);
+        break;
+    }
+  }
+
+  // Determine optimized pattern base on stats we have.
+  SubPatternMetadata& firstSubPattern = subPatterns[0];
+  SubPatternMetadata& lastSubPattern = subPatterns[numSubPatterns - 1];
+
+  // Single sub-pattern.
+  if (numSubPatterns == 1) {
+    if (firstSubPattern.kind ==
+        SubPatternMetadata::SubPatternKind::kSingleCharWildcard) {
+      return PatternMetadata::exactlyN(firstSubPattern.pattern.size());
+    } else if (
+        firstSubPattern.kind ==
+        SubPatternMetadata::SubPatternKind::kAnyCharsWildcard) {
+      return PatternMetadata::atLeastN(0);
+    } else {
+      return PatternMetadata::fixed(subPatterns);
+    }
+  } else { // Multiple sub-patterns.
+    // No kLiteralString sub-pattern.
+    if (literalStats.count == 0) {
+      size_t singleCharacterWildcardCount = 0;
+
+      // Count the number of single character wildcard count.
+      for (auto i = 0; i < numSubPatterns; i++) {
+        SubPatternMetadata& subPattern = subPatterns[i];
+        if (subPattern.kind ==
+            SubPatternMetadata::SubPatternKind::kSingleCharWildcard) {
+          singleCharacterWildcardCount += subPattern.pattern.size();
+        }
+      }
+      return PatternMetadata::atLeastN(singleCharacterWildcardCount);
+    } else {
+      // At this point, the pattern contains at least one kLiteralString
+      // sub-pattern.
+
+      // If there are only one literal sub-pattern and several any-wildcard
+      // sub-patterns.
+      if (singleCharWildcardStats.count == 0 && literalStats.count == 1 &&
+          anyCharsWildcardStats.count > 0) {
+        if (firstSubPattern.kind ==
+            SubPatternMetadata::SubPatternKind::kLiteralString) {
+          return PatternMetadata::prefix({firstSubPattern});
+        } else if (
+            lastSubPattern.kind ==
+            SubPatternMetadata::SubPatternKind::kLiteralString) {
+          return PatternMetadata::suffix({lastSubPattern});
+        } else if (
+            subPatterns.size() == 3 &&
+            firstSubPattern.kind ==
+                SubPatternMetadata::SubPatternKind::kAnyCharsWildcard &&
+            lastSubPattern.kind ==
+                SubPatternMetadata::SubPatternKind::kAnyCharsWildcard) {
+          return PatternMetadata::substring({subPatterns[1]});
+        }
+      }
+
+      // No any-wildcard sub-pattern.
+      if (anyCharsWildcardStats.count == 0 &&
+          singleCharWildcardStats.count > 0) {
+        return PatternMetadata::relaxedFixed(std::move(subPatterns));
+      }
+
+      // Pattern contains kAnyCharsWildcard, kSingleCharWildcard &
+      // kLiteralString.
+      if (singleCharWildcardStats.count > 0 &&
+          anyCharsWildcardStats.count > 0) {
+        auto firstOfLiteralOrSingleWildcard = std::min(
+            literalStats.firstIndex, singleCharWildcardStats.firstIndex);
+        auto lastOfLiteralOrSingleWildcard =
+            std::max(literalStats.lastIndex, singleCharWildcardStats.lastIndex);
+
+        // kSingleCharWildcard & kLiteralString sub-patterns surrounded by
+        // kAnyCharsWildcard sub-pattern.
+        if (firstOfLiteralOrSingleWildcard > 0 &&
+            lastOfLiteralOrSingleWildcard < numSubPatterns - 1) {
+          bool containsAnyWildcardBetween = false;
+          for (auto i = firstOfLiteralOrSingleWildcard + 1;
+               i < lastOfLiteralOrSingleWildcard;
+               i++) {
+            if (subPatterns[i].kind ==
+                SubPatternMetadata::SubPatternKind::kAnyCharsWildcard) {
+              containsAnyWildcardBetween = true;
+              break;
+            }
+          }
+
+          if (!containsAnyWildcardBetween) {
+            std::vector<SubPatternMetadata> literalOrStringPatterns{
+                subPatterns.begin() + firstOfLiteralOrSingleWildcard,
+                subPatterns.begin() + lastOfLiteralOrSingleWildcard + 1};
+            return PatternMetadata::relaxedSubstring(
+                std::move(literalOrStringPatterns));
+          }
+        } else if (
+            lastOfLiteralOrSingleWildcard < anyCharsWildcardStats.lastIndex) {
+          std::vector<SubPatternMetadata> literalOrStringPatterns{
+              subPatterns.begin() + firstOfLiteralOrSingleWildcard,
+              subPatterns.begin() + lastOfLiteralOrSingleWildcard + 1};
+          return PatternMetadata::relaxedPrefix(
+              std::move(literalOrStringPatterns));
+        } else if (
+            firstOfLiteralOrSingleWildcard > anyCharsWildcardStats.lastIndex) {
+          std::vector<SubPatternMetadata> literalOrStringPatterns{
+              subPatterns.begin() + firstOfLiteralOrSingleWildcard,
+              subPatterns.begin() + lastOfLiteralOrSingleWildcard + 1};
+          return PatternMetadata::relaxedSuffix(
+              std::move(literalOrStringPatterns));
         }
       }
     }
   }
 
-  // The pattern end may not been marked if there is no wildcard char after
-  // pattern start, so we mark it here.
-  if (fixedPatternStart != -1 && fixedPatternEnd == -1) {
-    fixedPatternEnd = iterator.currentIndex() - 1;
-  }
-
-  // At this point pattern has max of one fixed pattern.
-  // Pattern contains wildcard characters only.
-  if (fixedPatternStart == -1) {
-    if (anyCharacterWildcardCount == 0) {
-      return PatternMetadata{
-          PatternKind::kExactlyN, singleCharacterWildcardCount};
-    }
-    return PatternMetadata{
-        PatternKind::kAtLeastN, singleCharacterWildcardCount};
-  }
-
-  // At this point pattern contains exactly one fixed pattern.
-  // Pattern contains no wildcard characters (is a fixed pattern).
-  if (wildcardStart == -1) {
-    auto fixedPattern = unescape(pattern, 0, patternLength, escapeChar);
-    return PatternMetadata{
-        PatternKind::kFixed, fixedPattern.size(), fixedPattern};
-  }
-
-  // Pattern is generic if it has '_' wildcard characters and a fixed pattern.
-  if (singleCharacterWildcardCount > 0) {
-    return PatternMetadata{PatternKind::kGeneric, 0};
-  }
-
-  // Classify pattern as prefix, fixed center, or suffix pattern based on the
-  // position and count of the wildcard character sequence and fixed pattern.
-  if (fixedPatternStart < wildcardStart) {
-    auto fixedPattern = unescape(pattern, 0, wildcardStart, escapeChar);
-    return PatternMetadata{
-        PatternKind::kPrefix, fixedPattern.size(), fixedPattern};
-  }
-
-  // if numWildcardSequences > 1, then fixed pattern must be in between them.
-  if (numWildcardSequences == 2) {
-    auto fixedPattern =
-        unescape(pattern, fixedPatternStart, fixedPatternEnd + 1, escapeChar);
-    return PatternMetadata{
-        PatternKind::kSubstring, fixedPattern.size(), fixedPattern};
-  }
-
-  auto fixedPattern =
-      unescape(pattern, fixedPatternStart, patternLength, escapeChar);
-
-  return PatternMetadata{
-      PatternKind::kSuffix, fixedPattern.size(), fixedPattern};
+  return PatternMetadata::generic();
 }
 
 std::shared_ptr<exec::VectorFunction> makeLike(
@@ -1273,7 +1630,7 @@ std::shared_ptr<exec::VectorFunction> makeLike(
   }
   auto pattern = constantPattern->as<ConstantVector<StringView>>()->valueAt(0);
 
-  PatternMetadata patternMetadata;
+  PatternMetadata patternMetadata = PatternMetadata::generic();
   try {
     patternMetadata = determinePatternKind(pattern, escapeChar);
   } catch (...) {
@@ -1281,28 +1638,37 @@ std::shared_ptr<exec::VectorFunction> makeLike(
         std::current_exception());
   }
 
-  size_t reducedLength = patternMetadata.length;
-  auto fixedPattern = patternMetadata.fixedPattern;
-
-  switch (patternMetadata.patternKind) {
+  switch (patternMetadata.patternKind()) {
     case PatternKind::kExactlyN:
       return std::make_shared<OptimizedLike<PatternKind::kExactlyN>>(
-          pattern, reducedLength);
+          patternMetadata);
     case PatternKind::kAtLeastN:
       return std::make_shared<OptimizedLike<PatternKind::kAtLeastN>>(
-          pattern, reducedLength);
+          patternMetadata);
     case PatternKind::kFixed:
       return std::make_shared<OptimizedLike<PatternKind::kFixed>>(
-          fixedPattern, reducedLength);
+          patternMetadata);
+    case PatternKind::kRelaxedFixed:
+      return std::make_shared<OptimizedLike<PatternKind::kRelaxedFixed>>(
+          patternMetadata);
     case PatternKind::kPrefix:
       return std::make_shared<OptimizedLike<PatternKind::kPrefix>>(
-          fixedPattern, reducedLength);
+          patternMetadata);
+    case PatternKind::kRelaxedPrefix:
+      return std::make_shared<OptimizedLike<PatternKind::kRelaxedPrefix>>(
+          patternMetadata);
     case PatternKind::kSuffix:
       return std::make_shared<OptimizedLike<PatternKind::kSuffix>>(
-          fixedPattern, reducedLength);
+          patternMetadata);
+    case PatternKind::kRelaxedSuffix:
+      return std::make_shared<OptimizedLike<PatternKind::kRelaxedSuffix>>(
+          patternMetadata);
     case PatternKind::kSubstring:
       return std::make_shared<OptimizedLike<PatternKind::kSubstring>>(
-          fixedPattern, reducedLength);
+          patternMetadata);
+    case PatternKind::kRelaxedSubstring:
+      return std::make_shared<OptimizedLike<PatternKind::kRelaxedSubstring>>(
+          patternMetadata);
     default:
       return std::make_shared<LikeWithRe2>(pattern, escapeChar);
   }
