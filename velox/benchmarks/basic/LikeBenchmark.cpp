@@ -35,7 +35,6 @@ int main(int argc, char** argv) {
   // Register the scalar functions.
   prestosql::registerAllScalarFunctions("");
 
-  // exec::register
   ExpressionBenchmarkBuilder benchmarkBuilder;
   const vector_size_t vectorSize = 1000;
   auto vectorMaker = benchmarkBuilder.vectorMaker();
@@ -70,18 +69,21 @@ int main(int argc, char** argv) {
       .addBenchmarkSet(
           "like_substring", vectorMaker.rowVector({"col0"}, {substringInput}))
       .addExpression("like_substring", R"(like(col0, '%a\_b\_c%', '\'))")
+      .addExpression("like_relaxed_substring", R"(like(col0, '%_\_b_c%', '\'))")
       .addExpression("strpos", R"(strpos(col0, 'a_b_c') > 0)");
 
   benchmarkBuilder
       .addBenchmarkSet(
           "like_prefix", vectorMaker.rowVector({"col0"}, {prefixInput}))
       .addExpression("like_prefix", R"(like(col0, 'a\_b\_c%', '\'))")
+      .addExpression("like_relaxed_prefix", R"(like(col0, 'a\__\_c%', '\'))")
       .addExpression("starts_with", R"(starts_with(col0, 'a_b_c'))");
 
   benchmarkBuilder
       .addBenchmarkSet(
           "like_suffix", vectorMaker.rowVector({"col0"}, {suffixInput}))
       .addExpression("like_suffix", R"(like(col0, '%a\_b\_c', '\'))")
+      .addExpression("like_relaxed_suffix", R"(like(col0, '%a\__\_c', '\'))")
       .addExpression("ends_with", R"(ends_with(col0, 'a_b_c'))");
 
   benchmarkBuilder

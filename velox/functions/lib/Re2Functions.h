@@ -30,32 +30,116 @@ namespace facebook::velox::functions {
 enum class PatternKind {
   /// Pattern containing wildcard character '_' only, such as _, __, ____.
   kExactlyN,
-  /// Pattern containing wildcard characters ('_' or '%') only with atleast one
+  /// Pattern containing wildcard characters ('_' or '%') only with at least one
   /// '%', such as ___%, _%__.
   kAtLeastN,
   /// Pattern with no wildcard characters, such as 'presto', 'foo'.
   kFixed,
+  /// Pattern with single wildcard chars(_) & normal chars, such as
+  /// '_pr_es_to_'.
+  kRelaxedFixed,
   /// Fixed pattern followed by one or more '%', such as 'hello%', 'foo%%%%'.
   kPrefix,
+  /// kRelaxedFixed pattern followed by one or more '%', such as '_pr_es_to_%',
+  /// '_pr_es_to_%%%%'.
+  kRelaxedPrefix,
   /// Fixed pattern preceded by one or more '%', such as '%foo', '%%%hello'.
   kSuffix,
+  /// kRelaxedFixed preceded by one or more '%', such as '%_pr_es_to_',
+  /// '%%%_pr_es_to_'.
+  kRelaxedSuffix,
   /// Patterns matching '%{c0}%', such as '%foo%%', '%%%hello%'.
   kSubstring,
+  /// Patterns matching '%<kRelaxedFixed>%', such as '%_pr_es_to_%%',
+  /// '%%%_pr_es_to_%'.
+  kRelaxedSubstring,
   /// Patterns which do not fit any of the above types, such as 'hello_world',
   /// '_presto%'.
   kGeneric,
 };
 
-struct PatternMetadata {
-  PatternKind patternKind;
-  // Contains the length of the unescaped fixed pattern for patterns of kind
-  // kFixed, kPrefix, kSuffix and kSubstring. Contains the count of wildcard
-  // character '_' for patterns of kind kExactlyN and kAtLeastN. Contains 0
-  // otherwise.
-  size_t length;
-  // Contains the unescaped fixed pattern in patterns of kind kFixed, kPrefix,
-  // kSuffix and kSubstring.
-  std::string fixedPattern = "";
+struct SubPatternMetadata {
+  enum class SubPatternKind {
+    kSingleCharWildcard,
+    kAnyCharsWildcard,
+    kLiteralString
+  };
+
+  SubPatternKind kind;
+  /// Pattern string of the kind.
+  /// For kSingleCharWildcard, it could be '___';
+  /// For kAnyCharsWildcard, it could be '%%';
+  /// For kLiteralString, it could be 'abc'.
+  std::string pattern;
+};
+
+class PatternMetadata {
+ public:
+  static PatternMetadata generic();
+  static PatternMetadata atLeastN(size_t length);
+  static PatternMetadata exactlyN(size_t length);
+  static PatternMetadata fixed(std::vector<SubPatternMetadata> subPatterns);
+  static PatternMetadata relaxedFixed(
+      std::vector<SubPatternMetadata> subPatterns);
+  static PatternMetadata prefix(std::vector<SubPatternMetadata> subPatterns);
+  static PatternMetadata relaxedPrefix(
+      std::vector<SubPatternMetadata> subPatterns);
+  static PatternMetadata suffix(std::vector<SubPatternMetadata> subPatterns);
+  static PatternMetadata relaxedSuffix(
+      std::vector<SubPatternMetadata> subPatterns);
+  static PatternMetadata substring(std::vector<SubPatternMetadata> subPatterns);
+  static PatternMetadata relaxedSubstring(
+      std::vector<SubPatternMetadata> subPatterns);
+
+  const PatternKind patternKind() const {
+    return patternKind_;
+  }
+
+  const size_t length() const {
+    return length_;
+  }
+
+  const std::vector<SubPatternMetadata>& subPatterns() const {
+    return subPatterns_;
+  }
+
+  const std::string& fixedPattern() const {
+    return fixedPattern_;
+  }
+
+  const size_t leadingSingleWildcardCharsCount() const {
+    return leadingSingleWildcardCharsCount_;
+  }
+
+  const size_t restFixedLength() const {
+    return restFixedLength_;
+  }
+
+ private:
+  PatternMetadata(
+      PatternKind patternKind,
+      size_t length,
+      std::vector<SubPatternMetadata> subPatterns,
+      size_t leadingSingleWildcardCharsCount,
+      size_t restFixedLength);
+
+  PatternKind patternKind_;
+  /// Contains the length of the unescaped fixed pattern for patterns of kind
+  /// k[Relaxed]Fixed, k[Relaxed]Prefix, k[Relaxed]Suffix and
+  /// k[Relaxed]Substring. Contains the count of wildcard character '_' for
+  /// patterns of kind kExactlyN and kAtLeastN. Contains 0/// otherwise.
+  size_t length_;
+  /// Contains the fixed pattern in patterns of kind k[Relaxed]Fixed,
+  /// k[Relaxed]Prefix, k[Relaxed]Suffix and k[Relaxed]Substring.
+  std::string fixedPattern_;
+  /// Contains the sub-patterns for k[Relaxed]Xxx patterns.
+  std::vector<SubPatternMetadata> subPatterns_;
+
+  /// The following two properties are for kRelaxedSubstring optimization.
+  /// How many leading single char wildcard for kRelaxedSubstring.
+  size_t leadingSingleWildcardCharsCount_;
+  /// Pattern string length excluding the leading single wildcards.
+  size_t restFixedLength_;
 };
 inline const int kMaxCompiledRegexes = 20;
 
