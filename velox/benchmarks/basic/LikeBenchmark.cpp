@@ -35,43 +35,41 @@ int main(int argc, char** argv) {
   const vector_size_t vectorSize = 1000;
   auto vectorMaker = benchmarkBuilder.vectorMaker();
 
-  std::string temp;
-  auto substringInput = vectorMaker.flatVector<facebook::velox::StringView>(
+  auto substringInput = vectorMaker.flatVector<std::string>(
       vectorSize,
       [&](auto row) {
         // Only when the number is even we make a string contains a substring
         // a_b_c.
         if (row % 2 == 0) {
           auto padding = std::string("x", row / 2 + 1);
-          temp = fmt::format("{}a_b_c{}", padding, padding);
+          return fmt::format("{}a_b_c{}", padding, padding);
         } else {
-          temp = std::string("x", row);
+          return std::string("x", row);
         }
-        return StringView(temp);
       },
       nullptr);
-  auto prefixInput = vectorMaker.flatVector<facebook::velox::StringView>(
+
+  auto prefixInput = vectorMaker.flatVector<std::string>(
       vectorSize,
       [&](auto row) {
         // Only when the number is even we make a string starts with a_b_c.
         if (row % 2 == 0) {
-          temp = fmt::format("a_b_c{}", std::string("x", row));
+          return fmt::format("a_b_c{}", std::string("x", row));
         } else {
-          temp = std::string("x", row);
+          return std::string("x", row);
         }
-        return StringView(temp);
       },
       nullptr);
-  auto suffixInput = vectorMaker.flatVector<facebook::velox::StringView>(
+
+  auto suffixInput = vectorMaker.flatVector<std::string>(
       vectorSize,
       [&](auto row) {
         // Only when the number is even we make a string ends with a_b_c.
         if (row % 2 == 0) {
-          temp = fmt::format("{}a_b_c", std::string("x", row));
+          return fmt::format("{}a_b_c", std::string("x", row));
         } else {
-          temp = std::string("x", row);
+          return std::string("x", row);
         }
-        return StringView(temp);
       },
       nullptr);
 

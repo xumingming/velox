@@ -67,11 +67,9 @@ add_executable(velox_like_functions_benchmark LikeFunctionsBenchmark.cpp)
 target_link_libraries(velox_like_functions_benchmark ${velox_benchmark_deps}
                       velox_functions_lib velox_tpch_gen velox_vector_test_lib)
 
-add_executable(velox_like_with_escape_char_benchmark
-               LikeWithEscapeCharBenchmark.cpp)
-target_link_libraries(
-  velox_like_with_escape_char_benchmark ${velox_benchmark_deps}
-  velox_functions_lib velox_vector_test_lib)
+add_executable(velox_like_benchmark LikeBenchmark.cpp)
+target_link_libraries(velox_like_benchmark ${velox_benchmark_deps}
+                      velox_functions_lib velox_vector_test_lib)
 
 add_executable(velox_benchmark_basic_vector_fuzzer VectorFuzzer.cpp)
 target_link_libraries(velox_benchmark_basic_vector_fuzzer
