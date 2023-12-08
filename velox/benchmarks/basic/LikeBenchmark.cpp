@@ -79,10 +79,10 @@ int main(int argc, char** argv) {
           vectorMaker.rowVector(
               {"col0", "col1", "col2"},
               {substringInput, prefixInput, suffixInput}))
-      .addExpression("like_substring", R"(like (col0, '%a\_b\_c%', '\'))")
-      .addExpression("like_prefix", R"(like (col1, 'a\_b\_c%', '\'))")
-      .addExpression("like_suffix", R"(like (col2, '%a\_b\_c', '\'))")
-      .addExpression("like_generic", R"(like (col0, '%a%b%c'))")
+      .addExpression("substring", R"(like (col0, '%a\_b\_c%', '\'))")
+      .addExpression("prefix", R"(like (col1, 'a\_b\_c%', '\'))")
+      .addExpression("suffix", R"(like (col2, '%a\_b\_c', '\'))")
+      .addExpression("generic", R"(like (col0, '%a%b%c'))")
       .withIterations(10)
       .disableTesting();
 
