@@ -35,9 +35,8 @@ int main(int argc, char** argv) {
   const vector_size_t vectorSize = 1000;
   auto vectorMaker = benchmarkBuilder.vectorMaker();
 
-  auto substringInput = vectorMaker.flatVector<std::string>(
-      vectorSize,
-      [&](auto row) {
+  auto substringInput =
+      vectorMaker.flatVector<std::string>(vectorSize, [&](auto row) {
         // Only when the number is even we make a string contains a substring
         // a_b_c.
         if (row % 2 == 0) {
@@ -46,32 +45,27 @@ int main(int argc, char** argv) {
         } else {
           return std::string("x", row);
         }
-      },
-      nullptr);
+      });
 
-  auto prefixInput = vectorMaker.flatVector<std::string>(
-      vectorSize,
-      [&](auto row) {
+  auto prefixInput =
+      vectorMaker.flatVector<std::string>(vectorSize, [&](auto row) {
         // Only when the number is even we make a string starts with a_b_c.
         if (row % 2 == 0) {
           return fmt::format("a_b_c{}", std::string("x", row));
         } else {
           return std::string("x", row);
         }
-      },
-      nullptr);
+      });
 
-  auto suffixInput = vectorMaker.flatVector<std::string>(
-      vectorSize,
-      [&](auto row) {
+  auto suffixInput =
+      vectorMaker.flatVector<std::string>(vectorSize, [&](auto row) {
         // Only when the number is even we make a string ends with a_b_c.
         if (row % 2 == 0) {
           return fmt::format("{}a_b_c", std::string("x", row));
         } else {
           return std::string("x", row);
         }
-      },
-      nullptr);
+      });
 
   benchmarkBuilder
       .addBenchmarkSet(
@@ -83,7 +77,6 @@ int main(int argc, char** argv) {
       .addExpression("prefix", R"(like (col1, 'a\_b\_c%', '\'))")
       .addExpression("suffix", R"(like (col2, '%a\_b\_c', '\'))")
       .addExpression("generic", R"(like (col0, '%a%b%c'))")
-      .withIterations(10)
       .disableTesting();
 
   benchmarkBuilder.registerBenchmarks();
