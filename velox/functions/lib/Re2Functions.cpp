@@ -980,13 +980,6 @@ std::string unescape(
   }
 
   std::ostringstream os;
-  // Append the specified range to the stream.
-  auto appendChars = [&](const char* start, const char* end) {
-    for (auto it = start; it < end; it++) {
-      os << *it;
-    }
-  };
-
   auto cursor = pattern.begin() + start;
   auto endCursor = pattern.begin() + end;
   while (cursor < endCursor) {
@@ -997,7 +990,7 @@ std::string unescape(
     if (cursor < endCursor) {
       // There are non-escape chars, append them.
       if (previous < cursor) {
-        appendChars(previous, cursor);
+        os.write(previous, cursor - previous);
       }
 
       // Make sure there is a following normal char.
@@ -1016,7 +1009,7 @@ std::string unescape(
       os << current;
     } else {
       // Escape char not found, append all the non-escape chars.
-      appendChars(previous, endCursor);
+      os.write(previous, endCursor - previous);
       break;
     }
 
@@ -1027,21 +1020,25 @@ std::string unescape(
   return os.str();
 }
 
-/// An iterator that provides methods(hasNext, next) to iterate through a
-/// pattern string. We call hasNext to see if there are more chars, call next
-/// to advance the cursor to next char.
+// An iterator that provides methods(hasNext, next) to iterate through a
+// pattern string. We call hasNext to see if there are more chars, call next
+// to advance the cursor to next char.
 class PatternStringIterator {
  public:
-  /// Represents the state of current cursor/char.
+  // Represents the state of current cursor/char.
   enum class CharKind {
     // Escape char.
     // NOTE: If escape char is set as '\',  for pattern '\\', the first '\' is
     // an escaping char, the second is not, it is just a literal '\'
     kEscape,
-    // Wildcard char.
+    // Wildcard char: %.
     // NOTE: If escape char is set as '\', for pattern '\%%', the first '%' is
     // not a wildcard, just a literal '%', the second '%' is a wildcard.
-    kWildcard,
+    kAnyCharsWildcard,
+    // Wildcard char: _.
+    // NOTE: If escape char is set as '\', for pattern '\__', the first '_' is
+    // not a wildcard, just a literal '_', the second '_' is a wildcard.
+    kSingleCharWildcard,
     // Chars that are not escape char & not wildcard char.
     kNormal
   };
@@ -1049,29 +1046,26 @@ class PatternStringIterator {
   PatternStringIterator(StringView pattern, std::optional<char> escapeChar)
       : pattern_(pattern), escapeChar_(escapeChar) {}
 
-  /// Are there more chars to iterate?
-  bool hasNext() const {
-    return currentIndex_ < (int32_t)(pattern_.size() - 1);
-  }
-
-  /// Advance the cursor to next char, escape char is automatically handled.
+  // Advance the cursor to next char, escape char is automatically handled.
   bool next() {
-    nextInternal();
+    if (!nextInternal()) {
+      return false;
+    }
+
     userPreviousCharKind_ = previousCharKind_;
 
     if (charKind_ == CharKind::kEscape) {
       // Escape char should be followed by another char.
-      if (!hasNext()) {
+      if (!nextInternal()) {
+        hasError_ = true;
         return false;
       }
-
-      // Advance the cursor.
-      nextInternal();
 
       auto currentChar = current();
       // The char follows escapeChar can only be one of (%, _, escapeChar).
       if (currentChar != '%' && currentChar != '_' &&
           currentChar != escapeChar_) {
+        hasError_ = true;
         return false;
       }
     }
@@ -1079,29 +1073,79 @@ class PatternStringIterator {
     return true;
   }
 
-  /// Current index of the cursor.
+  bool hasError() {
+    return hasError_;
+  }
+
+  // Current index of the cursor.
   char currentIndex() const {
     return currentIndex_;
   }
 
-  /// Char at current cursor.
+  // Char at current cursor.
   char current() const {
     return pattern_.data()[currentIndex_];
   }
 
-  /// Kind of the current char.
+  // Kind of the current char.
   CharKind charKind() const {
     return charKind_;
   }
 
-  /// Kind of previous char(escape char is skipped).
+  bool isAnyCharsWildcard() const {
+    return charKind_ == CharKind::kAnyCharsWildcard;
+  }
+
+  bool isSingleCharWildcard() const {
+    return charKind_ == CharKind::kSingleCharWildcard;
+  }
+
+  bool isWildcard() {
+    return isAnyCharsWildcard() || isSingleCharWildcard();
+  }
+
+  bool isPreviousWildcard() {
+    return userPreviousCharKind_ == CharKind::kAnyCharsWildcard ||
+        userPreviousCharKind_ == CharKind::kSingleCharWildcard;
+  }
+
+  // Kind of previous char(escape char is skipped).
   CharKind previousCharKind() const {
     return userPreviousCharKind_;
   }
 
  private:
+  // Advance the cursor to next char.
+  bool nextInternal() {
+    if (currentIndex_ >= (int32_t)(pattern_.size() - 1)) {
+      return false;
+    }
+
+    currentIndex_++;
+    previousCharKind_ = charKind_;
+
+    auto currentChar = pattern_.data()[currentIndex_];
+    if (previousCharKind_ != CharKind::kEscape && currentChar == escapeChar_) {
+      charKind_ = CharKind::kEscape;
+    } else if (
+        previousCharKind_ != CharKind::kEscape && currentChar != escapeChar_ &&
+        (currentChar == '_' || currentChar == '%')) {
+      if (currentChar == '_') {
+        charKind_ = CharKind::kSingleCharWildcard;
+      } else {
+        charKind_ = CharKind::kAnyCharsWildcard;
+      }
+    } else {
+      charKind_ = CharKind::kNormal;
+    }
+
+    return true;
+  }
+
   const StringView pattern_;
   const std::optional<char> escapeChar_;
+  // Whether there is error during iterating? e.g. invalid escape sequence.
+  bool hasError_ = false;
 
   int32_t currentIndex_ = -1;
   // Kind of current char.
@@ -1113,23 +1157,6 @@ class PatternStringIterator {
   // described by an example: for pattern string 'a\_b', if the cursor is at '_'
   // previousCharKind_ is kEscape, while userPreviousCharKind_ is kNormal.
   CharKind userPreviousCharKind_ = CharKind::kNormal;
-
-  /// Advance the cursor to next char.
-  void nextInternal() {
-    currentIndex_++;
-    previousCharKind_ = charKind_;
-
-    auto currentChar = pattern_.data()[currentIndex_];
-    if (previousCharKind_ != CharKind::kEscape && currentChar == escapeChar_) {
-      charKind_ = CharKind::kEscape;
-    } else if (
-        previousCharKind_ != CharKind::kEscape && currentChar != escapeChar_ &&
-        (currentChar == '_' || currentChar == '%')) {
-      charKind_ = CharKind::kWildcard;
-    } else {
-      charKind_ = CharKind::kNormal;
-    }
-  }
 };
 
 PatternMetadata determinePatternKind(
@@ -1156,25 +1183,16 @@ PatternMetadata determinePatternKind(
 
   // Iterator through the pattern string to collect the stats for the simple
   // patterns that we can optimize.
-  while (iterator.hasNext()) {
-    if (!iterator.next()) {
-      fallbackToGeneric = true;
-      break;
-    }
-
+  while (iterator.next()) {
     auto current = iterator.current();
-    if (iterator.charKind() == PatternStringIterator::CharKind::kWildcard) {
+    if (iterator.isWildcard()) {
       if (wildcardStart == -1) {
         wildcardStart = iterator.currentIndex();
       }
 
       singleCharacterWildcardCount += (iterator.current() == '_');
       anyCharacterWildcardCount += (iterator.current() == '%');
-      numWildcardSequences +=
-          (iterator.previousCharKind() !=
-                   PatternStringIterator::CharKind::kWildcard
-               ? 1
-               : 0);
+      numWildcardSequences += (iterator.isPreviousWildcard() ? 0 : 1);
 
       // Mark the end of the fixed pattern.
       if (fixedPatternStart != -1 && fixedPatternEnd == -1) {
@@ -1186,8 +1204,7 @@ PatternMetadata determinePatternKind(
         fixedPatternStart = iterator.currentIndex();
       } else {
         // This is not the first fixed pattern, not supported, so fallback.
-        if (iterator.previousCharKind() ==
-            PatternStringIterator::CharKind::kWildcard) {
+        if (iterator.isPreviousWildcard()) {
           fallbackToGeneric = true;
           break;
         }
@@ -1195,7 +1212,7 @@ PatternMetadata determinePatternKind(
     }
   }
 
-  if (fallbackToGeneric) {
+  if (fallbackToGeneric || iterator.hasError()) {
     return PatternMetadata{PatternKind::kGeneric, 0};
   } else {
     // The pattern end may not been marked if there is no wildcard char after
