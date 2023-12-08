@@ -1020,76 +1020,51 @@ std::string unescape(
   return os.str();
 }
 
-// An iterator that provides methods(hasNext, next) to iterate through a
-// pattern string. We call hasNext to see if there are more chars, call next
-// to advance the cursor to next char.
+// An iterator to iterate through a pattern string. It will handle escaping
+// automatically.
 class PatternStringIterator {
  public:
-  // Represents the state of current cursor/char.
-  enum class CharKind {
-    // Escape char.
-    // NOTE: If escape char is set as '\',  for pattern '\\', the first '\' is
-    // an escaping char, the second is not, it is just a literal '\'
-    kEscape,
-    // Wildcard char: %.
-    // NOTE: If escape char is set as '\', for pattern '\%%', the first '%' is
-    // not a wildcard, just a literal '%', the second '%' is a wildcard.
-    kAnyCharsWildcard,
-    // Wildcard char: _.
-    // NOTE: If escape char is set as '\', for pattern '\__', the first '_' is
-    // not a wildcard, just a literal '_', the second '_' is a wildcard.
-    kSingleCharWildcard,
-    // Chars that are not escape char & not wildcard char.
-    kNormal
-  };
-
   PatternStringIterator(StringView pattern, std::optional<char> escapeChar)
-      : pattern_(pattern), escapeChar_(escapeChar) {}
+      : pattern_(pattern),
+        escapeChar_(escapeChar),
+        lastIndex_{pattern_.size() - 1} {}
 
   // Advance the cursor to next char, escape char is automatically handled.
   bool next() {
-    if (!nextInternal()) {
+    if (currentIndex_ == lastIndex_) {
       return false;
     }
 
-    userPreviousCharKind_ = previousCharKind_;
+    userPreviousCharKind_ = charKind_;
+    nextInternal();
 
     if (charKind_ == CharKind::kEscape) {
       // Escape char should be followed by another char.
-      if (!nextInternal()) {
-        hasError_ = true;
-        return false;
-      }
+      VELOX_USER_CHECK_LT(
+          currentIndex_,
+          lastIndex_,
+          "Escape character must be followed by '%', '_' or the escape character itself: {}, escape {}",
+          pattern_,
+          escapeChar_.value())
 
+      nextInternal();
       auto currentChar = current();
       // The char follows escapeChar can only be one of (%, _, escapeChar).
       if (currentChar != '%' && currentChar != '_' &&
           currentChar != escapeChar_) {
-        hasError_ = true;
-        return false;
+        VELOX_USER_FAIL(
+            "Escape character must be followed by '%', '_' or the escape character itself: {}, escape {}",
+            pattern_,
+            escapeChar_.value())
       }
     }
 
     return true;
   }
 
-  bool hasError() {
-    return hasError_;
-  }
-
   // Current index of the cursor.
   char currentIndex() const {
     return currentIndex_;
-  }
-
-  // Char at current cursor.
-  char current() const {
-    return pattern_.data()[currentIndex_];
-  }
-
-  // Kind of the current char.
-  CharKind charKind() const {
-    return charKind_;
   }
 
   bool isAnyCharsWildcard() const {
@@ -1109,26 +1084,35 @@ class PatternStringIterator {
         userPreviousCharKind_ == CharKind::kSingleCharWildcard;
   }
 
-  // Kind of previous char(escape char is skipped).
-  CharKind previousCharKind() const {
-    return userPreviousCharKind_;
-  }
-
  private:
+  // Represents the state of current cursor/char.
+  enum class CharKind {
+    // Escape char.
+    // NOTE: If escape char is set as '\',  for pattern '\\', the first '\' is
+    // an escaping char, the second is not, it is just a literal '\'
+    kEscape,
+    // Wildcard char: %.
+    // NOTE: If escape char is set as '\', for pattern '\%%', the first '%' is
+    // not a wildcard, just a literal '%', the second '%' is a wildcard.
+    kAnyCharsWildcard,
+    // Wildcard char: _.
+    // NOTE: If escape char is set as '\', for pattern '\__', the first '_' is
+    // not a wildcard, just a literal '_', the second '_' is a wildcard.
+    kSingleCharWildcard,
+    // Chars that are not escape char & not wildcard char.
+    kNormal
+  };
+
   // Advance the cursor to next char.
-  bool nextInternal() {
-    if (currentIndex_ >= (int32_t)(pattern_.size() - 1)) {
-      return false;
-    }
+  void nextInternal() {
+    const bool previousEscape = (charKind_ == CharKind::kEscape);
 
     currentIndex_++;
-    previousCharKind_ = charKind_;
-
-    auto currentChar = pattern_.data()[currentIndex_];
-    if (previousCharKind_ != CharKind::kEscape && currentChar == escapeChar_) {
+    auto currentChar = current();
+    if (!previousEscape && currentChar == escapeChar_) {
       charKind_ = CharKind::kEscape;
     } else if (
-        previousCharKind_ != CharKind::kEscape && currentChar != escapeChar_ &&
+        !previousEscape && currentChar != escapeChar_ &&
         (currentChar == '_' || currentChar == '%')) {
       if (currentChar == '_') {
         charKind_ = CharKind::kSingleCharWildcard;
@@ -1138,20 +1122,20 @@ class PatternStringIterator {
     } else {
       charKind_ = CharKind::kNormal;
     }
+  }
 
-    return true;
+  // Char at current cursor.
+  char current() const {
+    return pattern_.data()[currentIndex_];
   }
 
   const StringView pattern_;
   const std::optional<char> escapeChar_;
-  // Whether there is error during iterating? e.g. invalid escape sequence.
-  bool hasError_ = false;
+  const size_t lastIndex_;
 
   int32_t currentIndex_ = -1;
   // Kind of current char.
   CharKind charKind_ = CharKind::kNormal;
-  // Kind of previous char(literally).
-  CharKind previousCharKind_ = CharKind::kNormal;
   // 'previousCharKind_' from user's perspective.
   // The difference between previousCharKind_ and realPreviousCharKind_ can be
   // described by an example: for pattern string 'a\_b', if the cursor is at '_'
@@ -1181,18 +1165,23 @@ PatternMetadata determinePatternKind(
   PatternStringIterator iterator{pattern, escapeChar};
   bool fallbackToGeneric = false;
 
-  // Iterator through the pattern string to collect the stats for the simple
+  // Iterate through the pattern string to collect the stats for the simple
   // patterns that we can optimize.
   while (iterator.next()) {
-    auto current = iterator.current();
     if (iterator.isWildcard()) {
       if (wildcardStart == -1) {
         wildcardStart = iterator.currentIndex();
       }
 
-      singleCharacterWildcardCount += (iterator.current() == '_');
-      anyCharacterWildcardCount += (iterator.current() == '%');
-      numWildcardSequences += (iterator.isPreviousWildcard() ? 0 : 1);
+      if (iterator.isSingleCharWildcard()) {
+        ++singleCharacterWildcardCount;
+      } else {
+        ++anyCharacterWildcardCount;
+      }
+
+      if (!iterator.isPreviousWildcard()) {
+        ++numWildcardSequences;
+      }
 
       // Mark the end of the fixed pattern.
       if (fixedPatternStart != -1 && fixedPatternEnd == -1) {
@@ -1205,33 +1194,29 @@ PatternMetadata determinePatternKind(
       } else {
         // This is not the first fixed pattern, not supported, so fallback.
         if (iterator.isPreviousWildcard()) {
-          fallbackToGeneric = true;
-          break;
+          return PatternMetadata{PatternKind::kGeneric, 0};
         }
       }
     }
   }
 
-  if (fallbackToGeneric || iterator.hasError()) {
-    return PatternMetadata{PatternKind::kGeneric, 0};
-  } else {
-    // The pattern end may not been marked if there is no wildcard char after
-    // pattern start, so we mark it here.
-    if (fixedPatternStart != -1 && fixedPatternEnd == -1) {
-      fixedPatternEnd = iterator.currentIndex() - 1;
-    }
+  // The pattern end may not been marked if there is no wildcard char after
+  // pattern start, so we mark it here.
+  if (fixedPatternStart != -1 && fixedPatternEnd == -1) {
+    fixedPatternEnd = iterator.currentIndex() - 1;
   }
 
   // At this point pattern has max of one fixed pattern.
   // Pattern contains wildcard characters only.
   if (fixedPatternStart == -1) {
-    if (!anyCharacterWildcardCount) {
+    if (anyCharacterWildcardCount == 0) {
       return PatternMetadata{
           PatternKind::kExactlyN, singleCharacterWildcardCount};
     }
     return PatternMetadata{
         PatternKind::kAtLeastN, singleCharacterWildcardCount};
   }
+
   // At this point pattern contains exactly one fixed pattern.
   // Pattern contains no wildcard characters (is a fixed pattern).
   if (wildcardStart == -1) {
@@ -1241,9 +1226,10 @@ PatternMetadata determinePatternKind(
   }
 
   // Pattern is generic if it has '_' wildcard characters and a fixed pattern.
-  if (singleCharacterWildcardCount) {
+  if (singleCharacterWildcardCount > 0) {
     return PatternMetadata{PatternKind::kGeneric, 0};
   }
+
   // Classify pattern as prefix, fixed center, or suffix pattern based on the
   // position and count of the wildcard character sequence and fixed pattern.
   if (fixedPatternStart < wildcardStart) {
@@ -1251,6 +1237,7 @@ PatternMetadata determinePatternKind(
     return PatternMetadata{
         PatternKind::kPrefix, fixedPattern.size(), fixedPattern};
   }
+
   // if numWildcardSequences > 1, then fixed pattern must be in between them.
   if (numWildcardSequences == 2) {
     auto fixedPattern =
@@ -1258,6 +1245,7 @@ PatternMetadata determinePatternKind(
     return PatternMetadata{
         PatternKind::kSubstring, fixedPattern.size(), fixedPattern};
   }
+
   auto fixedPattern =
       unescape(pattern, fixedPatternStart, patternLength, escapeChar);
 
@@ -1305,12 +1293,18 @@ std::shared_ptr<exec::VectorFunction> makeLike(
   }
   auto pattern = constantPattern->as<ConstantVector<StringView>>()->valueAt(0);
 
-  PatternMetadata patternMetadata = determinePatternKind(pattern, escapeChar);
-  PatternKind patternKind = patternMetadata.patternKind;
+  PatternMetadata patternMetadata;
+  try {
+    patternMetadata = determinePatternKind(pattern, escapeChar);
+  } catch (...) {
+    return std::make_shared<exec::AlwaysFailingVectorFunction>(
+        std::current_exception());
+  }
+
   size_t reducedLength = patternMetadata.length;
   auto fixedPattern = patternMetadata.fixedPattern;
 
-  switch (patternKind) {
+  switch (patternMetadata.patternKind) {
     case PatternKind::kExactlyN:
       return std::make_shared<OptimizedLike<PatternKind::kExactlyN>>(
           pattern, reducedLength);
