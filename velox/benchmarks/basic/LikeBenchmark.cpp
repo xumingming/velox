@@ -32,8 +32,8 @@ int main(int argc, char** argv) {
   folly::Init init(&argc, &argv);
 
   exec::registerStatefulVectorFunction("like", likeSignatures(), makeLike);
-  // Register the string functions we need.
-  prestosql::registerStringFunctions("");
+  // Register the scalar functions.
+  prestosql::registerAllScalarFunctions("");
 
   // exec::register
   ExpressionBenchmarkBuilder benchmarkBuilder;
@@ -68,19 +68,29 @@ int main(int argc, char** argv) {
 
   benchmarkBuilder
       .addBenchmarkSet(
-          "like",
-          vectorMaker.rowVector(
-              {"col0", "col1", "col2"},
-              {substringInput, prefixInput, suffixInput}))
+          "like_substring", vectorMaker.rowVector({"col0"}, {substringInput}))
       .addExpression("like_substring", R"(like(col0, '%a\_b\_c%', '\'))")
-      .addExpression("like_prefix", R"(like(col1, 'a\_b\_c%', '\'))")
-      .addExpression("like_suffix", R"(like(col2, '%a\_b\_c', '\'))")
-      .addExpression("like_generic", R"(like(col0, '%a%b%c'))")
-      .addExpression("strpos", R"(strpos(col0, 'a_b_c'))")
-      .addExpression("starts_with", R"(starts_with(col1, 'a_b_c'))")
-      .addExpression("ends_with", R"(ends_with(col2, 'a_b_c'))");
+      .addExpression("strpos", R"(strpos(col0, 'a_b_c') > 0)");
+
+  benchmarkBuilder
+      .addBenchmarkSet(
+          "like_prefix", vectorMaker.rowVector({"col0"}, {prefixInput}))
+      .addExpression("like_prefix", R"(like(col0, 'a\_b\_c%', '\'))")
+      .addExpression("starts_with", R"(starts_with(col0, 'a_b_c'))");
+
+  benchmarkBuilder
+      .addBenchmarkSet(
+          "like_suffix", vectorMaker.rowVector({"col0"}, {suffixInput}))
+      .addExpression("like_suffix", R"(like(col0, '%a\_b\_c', '\'))")
+      .addExpression("ends_with", R"(ends_with(col0, 'a_b_c'))");
+
+  benchmarkBuilder
+      .addBenchmarkSet(
+          "like_generic", vectorMaker.rowVector({"col0"}, {substringInput}))
+      .addExpression("like_generic", R"(like(col0, '%a%b%c'))");
 
   benchmarkBuilder.registerBenchmarks();
+  benchmarkBuilder.testBenchmarks();
   folly::runBenchmarks();
   return 0;
 }
