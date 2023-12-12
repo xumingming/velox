@@ -19,6 +19,7 @@
 
 #include "velox/benchmarks/ExpressionBenchmarkBuilder.h"
 #include "velox/functions/lib/Re2Functions.h"
+#include "velox/functions/prestosql/registration/RegistrationFunctions.h"
 
 using namespace facebook;
 using namespace facebook::velox;
@@ -31,41 +32,39 @@ int main(int argc, char** argv) {
   folly::Init init(&argc, &argv);
 
   exec::registerStatefulVectorFunction("like", likeSignatures(), makeLike);
+  // Register the string functions we need.
+  prestosql::registerStringFunctions("");
+
+  // exec::register
   ExpressionBenchmarkBuilder benchmarkBuilder;
   const vector_size_t vectorSize = 1000;
   auto vectorMaker = benchmarkBuilder.vectorMaker();
 
-  auto substringInput =
-      vectorMaker.flatVector<std::string>(vectorSize, [&](auto row) {
-        // Only when the number is even we make a string contains a substring
-        // a_b_c.
-        if (row % 2 == 0) {
-          auto padding = std::string("x", row / 2 + 1);
-          return fmt::format("{}a_b_c{}", padding, padding);
-        } else {
-          return std::string("x", row);
-        }
-      });
+  auto makeInput =
+      [&](vector_size_t vectorSize, bool padAtHead, bool padAtTail) {
+        return vectorMaker.flatVector<std::string>(vectorSize, [&](auto row) {
+          // Strings in even rows contain/start with/end with a_b_c depends on
+          // value of padAtHead && padAtTail.
+          if (row % 2 == 0) {
+            auto padding = std::string("x", row / 2 + 1);
+            if (padAtHead && padAtTail) {
+              return fmt::format("{}a_b_c{}", padding, padding);
+            } else if (padAtHead) {
+              return fmt::format("{}a_b_c", padding);
+            } else if (padAtTail) {
+              return fmt::format("a_b_c{}", padding);
+            } else {
+              return std::string("a_b_c");
+            }
+          } else {
+            return std::string("x", row);
+          }
+        });
+      };
 
-  auto prefixInput =
-      vectorMaker.flatVector<std::string>(vectorSize, [&](auto row) {
-        // Only when the number is even we make a string starts with a_b_c.
-        if (row % 2 == 0) {
-          return fmt::format("a_b_c{}", std::string("x", row));
-        } else {
-          return std::string("x", row);
-        }
-      });
-
-  auto suffixInput =
-      vectorMaker.flatVector<std::string>(vectorSize, [&](auto row) {
-        // Only when the number is even we make a string ends with a_b_c.
-        if (row % 2 == 0) {
-          return fmt::format("{}a_b_c", std::string("x", row));
-        } else {
-          return std::string("x", row);
-        }
-      });
+  auto substringInput = makeInput(vectorSize, true, true);
+  auto prefixInput = makeInput(vectorSize, false, true);
+  auto suffixInput = makeInput(vectorSize, true, false);
 
   benchmarkBuilder
       .addBenchmarkSet(
@@ -73,11 +72,13 @@ int main(int argc, char** argv) {
           vectorMaker.rowVector(
               {"col0", "col1", "col2"},
               {substringInput, prefixInput, suffixInput}))
-      .addExpression("substring", R"(like (col0, '%a\_b\_c%', '\'))")
-      .addExpression("prefix", R"(like (col1, 'a\_b\_c%', '\'))")
-      .addExpression("suffix", R"(like (col2, '%a\_b\_c', '\'))")
-      .addExpression("generic", R"(like (col0, '%a%b%c'))")
-      .disableTesting();
+      .addExpression("like_substring", R"(like(col0, '%a\_b\_c%', '\'))")
+      .addExpression("like_prefix", R"(like(col1, 'a\_b\_c%', '\'))")
+      .addExpression("like_suffix", R"(like(col2, '%a\_b\_c', '\'))")
+      .addExpression("like_generic", R"(like(col0, '%a%b%c'))")
+      .addExpression("strpos", R"(strpos(col0, 'a_b_c'))")
+      .addExpression("starts_with", R"(starts_with(col1, 'a_b_c'))")
+      .addExpression("ends_with", R"(ends_with(col2, 'a_b_c'))");
 
   benchmarkBuilder.registerBenchmarks();
   folly::runBenchmarks();

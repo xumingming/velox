@@ -1020,8 +1020,7 @@ std::string unescape(
   return os.str();
 }
 
-// An iterator to iterate through a pattern string. It will handle escaping
-// automatically.
+// Iterates through a pattern string. Transparently handles escape sequences.
 class PatternStringIterator {
  public:
   PatternStringIterator(StringView pattern, std::optional<char> escapeChar)
@@ -1030,6 +1029,8 @@ class PatternStringIterator {
         lastIndex_{pattern_.size() - 1} {}
 
   // Advance the cursor to next char, escape char is automatically handled.
+  // Return true if the cursor is advanced successfully, false otherwise(reached
+  // the end of the pattern string).
   bool next() {
     if (currentIndex_ == lastIndex_) {
       return false;
@@ -1118,8 +1119,8 @@ class PatternStringIterator {
   const std::optional<char> escapeChar_;
   const size_t lastIndex_;
 
-  int32_t currentIndex_ = -1;
-  CharKind charKind_ = CharKind::kNormal;
+  int32_t currentIndex_{-1};
+  CharKind charKind_{CharKind::kNormal};
   bool isPreviousWildcard_{false};
 };
 
