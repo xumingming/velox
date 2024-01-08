@@ -399,11 +399,11 @@ HiveDataSource::HiveDataSource(
     auto* handle = static_cast<const HiveColumnHandle*>(it->second.get());
     readerRowNames.push_back(handle->name());
     for (auto& subfield : handle->requiredSubfields()) {
-      VELOX_USER_CHECK_EQ(
+      /*VELOX_USER_CHECK_EQ(
           getColumnName(subfield),
           handle->name(),
-          "Required subfield does not match column name");
-      subfields[handle->name()].push_back(&subfield);
+          "Required subfield does not match column name");*/
+      subfields[getColumnName(subfield)].push_back(&subfield);
     }
   }
 
@@ -752,12 +752,22 @@ std::shared_ptr<common::ScanSpec> HiveDataSource::makeScanSpec(
   for (int i = 0; i < rowType->size(); ++i) {
     auto& name = rowType->nameOf(i);
     auto& type = rowType->childAt(i);
-    auto it = outputSubfields.find(name);
-    if (it == outputSubfields.end()) {
-      spec->addFieldRecursively(name, *type, i);
-      filterSubfields.erase(name);
-      continue;
+
+    const constexpr char* kPushDownSeparator = "$_$_$";
+    auto index = name.find(kPushDownSeparator);
+    if (index == std::string::npos) {
+      auto it = outputSubfields.find(name);
+      if (it == outputSubfields.end()) {
+        spec->addFieldRecursively(name, *type, i);
+        filterSubfields.erase(name);
+        continue;
+      }
     }
+
+    auto topFieldName = name.substr(0, index);
+    auto& topColumnType = dataColumns->findChild(topFieldName);
+
+    auto it = outputSubfields.find(topFieldName);
     for (auto* subfield : it->second) {
       subfieldSpecs.push_back({subfield, false});
     }
@@ -768,7 +778,7 @@ std::shared_ptr<common::ScanSpec> HiveDataSource::makeScanSpec(
       }
       filterSubfields.erase(it);
     }
-    addSubfields(*type, subfieldSpecs, 1, pool, *spec->addField(name, i));
+    addSubfields(*topColumnType, subfieldSpecs, 1, pool, *spec->addField(topFieldName, i));
     subfieldSpecs.clear();
   }
 
