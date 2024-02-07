@@ -51,9 +51,9 @@ VectorPtr newConstantFromString(
         pool, size, false, type, StringView(value.value()));
   } else {
     auto copy = velox::util::Converter<kind>::cast(value.value());
-    if constexpr (kind == TypeKind::TIMESTAMP) {
-      copy.toGMT(Timestamp::defaultTimezone());
-    }
+    // if constexpr (kind == TypeKind::TIMESTAMP) {
+    //   copy.toGMT(Timestamp::defaultTimezone());
+    // }
     return std::make_shared<ConstantVector<T>>(
         pool, size, false, type, std::move(copy));
   }
