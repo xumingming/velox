@@ -23,6 +23,7 @@
 /// TODO: This implementation will be revised for Spill to disk semantics.
 
 namespace facebook::velox::exec {
+
 class WindowPartition {
  public:
   /// The WindowPartition is used by the Window operator and WindowFunction
@@ -42,9 +43,35 @@ class WindowPartition {
       const std::vector<std::pair<column_index_t, core::SortOrder>>&
           sortKeyInfo);
 
+  virtual ~WindowPartition() = default;
+
   /// Returns the number of rows in the current WindowPartition.
-  vector_size_t numRows() const {
+  virtual vector_size_t numRows() const {
     return partition_.size();
+  }
+
+  virtual vector_size_t offsetInPartition() const {
+    return 0;
+  }
+
+  virtual bool supportRowLevelStreaming() const {
+    return false;
+  };
+
+  virtual void setInputRowsFinished() {
+    return;
+  }
+
+  virtual void addNewRows(std::vector<char*> rows) {
+    return;
+  }
+
+  virtual bool buildNextRows() {
+    return false;
+  }
+
+  virtual bool processFinished() const {
+    return true;
   }
 
   /// Copies the values at 'columnIndex' into 'result' (starting at
@@ -162,6 +189,7 @@ class WindowPartition {
       const vector_size_t* rawPeerBounds,
       vector_size_t* rawFrameBounds) const;
 
+ protected:
   // The RowContainer associated with the partition.
   // It is owned by the WindowBuild that creates the partition.
   RowContainer* data_;

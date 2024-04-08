@@ -15,6 +15,7 @@
  */
 #include "velox/exec/Window.h"
 #include "velox/exec/OperatorUtils.h"
+#include "velox/exec/RowsStreamingWindowBuild.h"
 #include "velox/exec/SortWindowBuild.h"
 #include "velox/exec/StreamingWindowBuild.h"
 #include "velox/exec/Task.h"
@@ -41,8 +42,13 @@ Window::Window(
   auto* spillConfig =
       spillConfig_.has_value() ? &spillConfig_.value() : nullptr;
   if (windowNode->inputsSorted()) {
-    windowBuild_ = std::make_unique<StreamingWindowBuild>(
-        windowNode, pool(), spillConfig, &nonReclaimableSection_);
+    if (supportRowLevelStreaming()) {
+      windowBuild_ = std::make_unique<RowsStreamingWindowBuild>(
+          windowNode_, pool(), spillConfig, &nonReclaimableSection_);
+    } else {
+      windowBuild_ = std::make_unique<StreamingWindowBuild>(
+          windowNode, pool(), spillConfig, &nonReclaimableSection_);
+    }
   } else {
     windowBuild_ = std::make_unique<SortWindowBuild>(
         windowNode, pool(), spillConfig, &nonReclaimableSection_, &spillStats_);
@@ -54,6 +60,7 @@ void Window::initialize() {
   VELOX_CHECK_NOT_NULL(windowNode_);
   createWindowFunctions();
   createPeerAndFrameBuffers();
+  windowBuild_->setNumRowsPerOutput(numRowsPerOutput_);
   windowNode_.reset();
 }
 
@@ -185,6 +192,30 @@ void Window::createWindowFunctions() {
     windowFrames_.push_back(
         createWindowFrame(windowNode_, windowNodeFunction.frame, inputType));
   }
+}
+
+// Support 'rank' and
+// 'row_number' functions and the agg window function with default frame.
+bool Window::supportRowLevelStreaming() {
+  for (const auto& windowNodeFunction : windowNode_->windowFunctions()) {
+    const auto& functionName = windowNodeFunction.functionCall->name();
+    auto windowFunctionMetadata =
+        exec::getWindowFunctionMetadata(functionName).value();
+    if (windowFunctionMetadata.processingUnit == ProcessingUnit::kPartition) {
+      return false;
+    }
+
+    const auto& frame = windowNodeFunction.frame;
+    bool isDefaultFrame =
+        (frame.startType == core::WindowNode::BoundType::kUnboundedPreceding &&
+         frame.endType == core::WindowNode::BoundType::kCurrentRow);
+    // Only support the agg window function with default frame.
+    if (!windowFunctionMetadata.ignoreFrame && !isDefaultFrame) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 void Window::addInput(RowVectorPtr input) {
@@ -587,7 +618,25 @@ vector_size_t Window::callApplyLoop(
           result);
       resultIndex += rowsForCurrentPartition;
       numOutputRowsLeft -= rowsForCurrentPartition;
-      callResetPartition();
+      if (currentPartition_->supportRowLevelStreaming()) {
+        if (currentPartition_->processFinished()) {
+          callResetPartition();
+          if (currentPartition_ &&
+              partitionOffset_ == currentPartition_->numRows()) {
+            if (!currentPartition_->buildNextRows()) {
+              break;
+            }
+          }
+
+        } else {
+          // Break until the next getOutput call to handle the remaining data in
+          // currentPartition_.
+          break;
+        }
+      } else {
+        callResetPartition();
+      }
+
       if (!currentPartition_) {
         // The WindowBuild doesn't have any more partitions to process right
         // now. So break until the next getOutput call.
@@ -625,6 +674,13 @@ RowVectorPtr Window::getOutput() {
     callResetPartition();
     if (!currentPartition_) {
       // WindowBuild doesn't have a partition to output.
+      return nullptr;
+    }
+  }
+
+  if (currentPartition_->supportRowLevelStreaming() &&
+      partitionOffset_ == currentPartition_->numRows()) {
+    if (!currentPartition_->buildNextRows()) {
       return nullptr;
     }
   }
