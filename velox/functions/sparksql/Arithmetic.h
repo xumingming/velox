@@ -108,6 +108,55 @@ struct DivideFunction {
   }
 };
 
+/// BRound function
+template <typename TNum, typename TDecimals>
+FOLLY_ALWAYS_INLINE TNum
+bround(const TNum& number, const TDecimals& decimals = 0) {
+  static_assert(!std::is_same_v<TNum, bool> && "bround not supported for bool");
+
+  if constexpr (std::is_integral_v<TNum>) {
+    return number;
+  }
+
+  if (!std::isfinite(number)) {
+    return number;
+  }
+
+  double factor = std::pow(10, decimals);
+  /* if (number < 0) {
+    return (std::round(number * factor * -1) / factor) * -1;
+  } */
+
+  // 1.15, 1
+
+  // 11
+  TNum scaledNum = std::round(number * factor);
+  // 11 / 10 = 1.1
+  TNum roundedNum = scaledNum / factor;
+  // 1.1 - 1.15 = -0.05
+  TNum diffNum = roundedNum - number;
+
+  // 0.05
+  if (std::abs(diffNum) != 0.5 / factor) {
+    return roundedNum;
+  }
+
+  if (fmod(roundedNum, 2.0) == 0.0) {
+    return roundedNum;
+  }
+
+  return number - diffNum;
+}
+
+template <typename T>
+struct BroundFunction {
+  template <typename TInput>
+  FOLLY_ALWAYS_INLINE void
+  call(TInput& result, const TInput& a, const int32_t b = 0) {
+    result = bround(a, b);
+  }
+};
+
 /*
   In Spark both ceil and floor must return Long type
   sql/catalyst/src/main/scala/org/apache/spark/sql/catalyst/expressions/mathExpressions.scala

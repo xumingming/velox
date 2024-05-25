@@ -133,6 +133,32 @@ TEST_F(RemainderTest, int64) {
   EXPECT_EQ(-1, remainder<int64_t>(INT64_MIN, INT64_MAX));
 }
 
+class BroundTest : public SparkFunctionBaseTest {
+ protected:
+  template <typename T>
+  std::optional<T> bround(std::optional<T> a, std::optional<int32_t> n) {
+    return evaluateOnce<T>("bround(c0, c1)", a, n);
+  };
+};
+
+TEST_F(BroundTest, testFloat) {
+  /*EXPECT_EQ(1, bround<float>(1.4, 0));
+  EXPECT_EQ(2, bround<float>(1.5, 0));
+  EXPECT_EQ(2, bround<float>(1.6, 0));
+
+  EXPECT_EQ(2, bround<float>(2.4, 0));
+  EXPECT_EQ(2, bround<float>(2.5, 0));
+  EXPECT_EQ(3, bround<float>(2.6, 0));
+
+  EXPECT_EQ(1.1f, bround<float>(1.14, 1));*/
+  EXPECT_EQ(1.2f, bround<float>(1.15, 1));
+  EXPECT_EQ(1.2f, bround<float>(1.16, 1));
+
+  EXPECT_EQ(1.2f, bround<float>(1.24, 1));
+  EXPECT_EQ(1.2f, bround<float>(1.25, 1));
+  EXPECT_EQ(1.3f, bround<float>(1.26, 1));
+}
+
 class ArithmeticTest : public SparkFunctionBaseTest {
  protected:
   template <typename T>

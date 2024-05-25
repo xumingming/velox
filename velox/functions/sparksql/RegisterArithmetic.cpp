@@ -73,6 +73,8 @@ void registerArithmeticFunctions(const std::string& prefix) {
   registerBinaryFloatingPoint<PModFloatFunction>({prefix + "pmod"});
   registerFunction<PowerFunction, double, double, double>({prefix + "power"});
   registerFunction<RIntFunction, double, double>({prefix + "rint"});
+
+  // Round functions.
   registerUnaryNumeric<RoundFunction>({prefix + "round"});
   registerFunction<RoundFunction, int8_t, int8_t, int32_t>({prefix + "round"});
   registerFunction<RoundFunction, int16_t, int16_t, int32_t>(
@@ -83,6 +85,21 @@ void registerArithmeticFunctions(const std::string& prefix) {
       {prefix + "round"});
   registerFunction<RoundFunction, double, double, int32_t>({prefix + "round"});
   registerFunction<RoundFunction, float, float, int32_t>({prefix + "round"});
+
+  // Bround functions.
+  registerUnaryNumeric<BroundFunction>({prefix + "bround"});
+  registerFunction<BroundFunction, int8_t, int8_t, int32_t>(
+      {prefix + "bround"});
+  registerFunction<BroundFunction, int16_t, int16_t, int32_t>(
+      {prefix + "bround"});
+  registerFunction<BroundFunction, int32_t, int32_t, int32_t>(
+      {prefix + "bround"});
+  registerFunction<BroundFunction, int64_t, int64_t, int32_t>(
+      {prefix + "bround"});
+  registerFunction<BroundFunction, double, double, int32_t>(
+      {prefix + "bround"});
+  registerFunction<BroundFunction, float, float, int32_t>({prefix + "bround"});
+
   registerFunction<UnHexFunction, Varbinary, Varchar>({prefix + "unhex"});
   // In Spark only long, double, and decimal have ceil/floor
   registerFunction<sparksql::CeilFunction, int64_t, int64_t>({prefix + "ceil"});
